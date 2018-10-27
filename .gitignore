@@ -1,5 +1,7 @@
 **/__pycache__
 
-data
+data/
+
+dataset/
 
 eval.py

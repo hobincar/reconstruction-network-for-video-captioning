@@ -3,201 +3,202 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import numpy as np
+from tensorboardX import SummaryWriter
 import torch
-from torch.jit import script, trace
 import torch.nn as nn
 from torch import optim
-import torch.nn.functional as F
-import csv
 import random
-import re
 import os
-import unicodedata
-import codecs
-from io import open
-import itertools
-import math
 
-from config import TrainConfig
-from dataset import voc, pairs, batch2TrainData
+from config import TrainConfig as C
+from dataset.MSVD import MSVD as MSVD_dataset
 from losses import maskNLLLoss
-from models.encoder import Encoder
 from models.decoder import Decoder
 
-
-C = TrainConfig()
 
 USE_CUDA = torch.cuda.is_available()
 device = torch.device("cuda" if USE_CUDA else "cpu")
 
-# Default word tokens
-PAD_token = 0  # Used for padding short sentences
-SOS_token = 1  # Start-of-sentence token
-EOS_token = 2  # End-of-sentence token
+
+def init_path():
+    os.makedirs(C.log_dpath, exist_ok=True)
+    os.makedirs(C.save_dpath, exist_ok=True)
 
 
-def train(input_variable, lengths, target_variable, mask, max_target_len, encoder, decoder, embedding,
-          encoder_optimizer, decoder_optimizer):
-
-    # Zero gradients
-    encoder_optimizer.zero_grad()
-    decoder_optimizer.zero_grad()
-
+def forward_decoder(encoder_outputs, target, target_mask, target_max_n_words, decoder, embedding, is_train):
     # Set device options
-    input_variable = input_variable.to(device)
-    lengths = lengths.to(device)
-    target_variable = target_variable.to(device)
-    mask = mask.to(device)
+    encoder_outputs = encoder_outputs.to(device)
+    target = target.to(device)
+    target_mask = target_mask.to(device)
 
     # Initialize variables
     loss = 0
-    print_losses = []
+    loss_vals = []
     n_totals = 0
-
-    # Forward pass through encoder
-    encoder_outputs, encoder_hidden = encoder(input_variable, lengths)
+    decoder_output_indices_list = []
 
     # Create initial decoder input (start with SOS tokens for each sentence)
-    decoder_input = torch.LongTensor([[SOS_token for _ in range(C.batch_size)]])
+    decoder_input = torch.LongTensor([[ C.init_word2idx['<SOS>'] for _ in range(C.batch_size) ]])
     decoder_input = decoder_input.to(device)
 
-    # Set initial decoder hidden state to the encoder's final hidden state
-    decoder_hidden = encoder_hidden[:decoder.n_layers]
+    decoder_hidden = torch.zeros(C.decoder_n_layers, C.batch_size, C.decoder_hidden_size)
+    decoder_hidden = decoder_hidden.to(device)
 
     # Determine if we are using teacher forcing this iteration
-    use_teacher_forcing = True if random.random() < C.teacher_forcing_ratio else False
+    use_teacher_forcing = random.random() < C.decoder_teacher_forcing_ratio
 
     # Forward batch of sequences through decoder one time step at a time
-    if use_teacher_forcing:
-        for t in range(max_target_len):
-            decoder_output, decoder_hidden = decoder(
-                decoder_input, decoder_hidden, encoder_outputs
-            )
+    for t in range(target_max_n_words):
+        decoder_output, decoder_hidden = decoder(
+            decoder_input, decoder_hidden, encoder_outputs
+        )
+        if is_train and use_teacher_forcing:
             # Teacher forcing: next input is current target
-            decoder_input = target_variable[t].view(1, -1)
-            # Calculate and accumulate loss
-            mask_loss, nTotal = maskNLLLoss(decoder_output, target_variable[t], mask[t], device)
-            loss += mask_loss
-            print_losses.append(mask_loss.item() * nTotal)
-            n_totals += nTotal
-    else:
-        for t in range(max_target_len):
-            decoder_output, decoder_hidden = decoder(
-                decoder_input, decoder_hidden, encoder_outputs
-            )
+            decoder_input = target[t].view(1, -1)
+        else:
             # No teacher forcing: next input is decoder's own current output
             _, topi = decoder_output.topk(1)
-            decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
+            decoder_output_indices = [ topi[i][0] for i in range(C.batch_size) ]
+            decoder_input = torch.LongTensor([ decoder_output_indices ])
             decoder_input = decoder_input.to(device)
-            # Calculate and accumulate loss
-            mask_loss, nTotal = maskNLLLoss(decoder_output, target_variable[t], mask[t], device)
-            loss += mask_loss
-            print_losses.append(mask_loss.item() * nTotal)
-            n_totals += nTotal
+            decoder_output_indices_list.append(decoder_output_indices)
+        # Calculate and accumulate loss
+        mask_loss, n_total = maskNLLLoss(decoder_output, target[t], target_mask[t], device)
+        loss += mask_loss
+        loss_vals.append(mask_loss.item() * n_total)
+        n_totals += n_total
+    loss_val = sum(loss_vals) / n_totals
 
-    # Perform backpropatation
-    loss.backward()
+    decoder_output_indices_list = torch.LongTensor(decoder_output_indices_list)
+    return loss, loss_val, decoder_output_indices_list
 
-    # Clip gradients: gradients are modified in place
-    _ = torch.nn.utils.clip_grad_norm_(encoder.parameters(), C.clip)
-    _ = torch.nn.utils.clip_grad_norm_(decoder.parameters(), C.clip)
 
-    # Adjust model weights
-    encoder_optimizer.step()
-    decoder_optimizer.step()
-
-    return sum(print_losses) / n_totals
+def convert_preds_to_captions(preds):
+    pred_captions = []
+    pred_indices_list = np.asarray(preds).T
+    for pred_indices in pred_indices_list:
+        pred_captions.append([])
+        for pred_idx in pred_indices:
+            if pred_idx == 0: continue
+            pred_captions[-1].append(vocab.idx2word[pred_idx])
+        pred_captions[-1] = " ".join(pred_captions[-1])
+    return pred_captions
 
 
 if __name__ == "__main__":
-    # Load model if a loadFilename is provided
-    if C.loadFilename:
-        # If loading on same machine the model was trained on
-        checkpoint = torch.load(C.loadFilename)
-        # If loading a model trained on GPU to CPU
-        #checkpoint = torch.load(loadFilename, map_location=torch.device('cpu'))
-        encoder_sd = checkpoint['en']
-        decoder_sd = checkpoint['de']
-        encoder_optimizer_sd = checkpoint['en_opt']
-        decoder_optimizer_sd = checkpoint['de_opt']
-        embedding_sd = checkpoint['embedding']
-        voc.__dict__ = checkpoint['voc_dict']
-    
-    
-    print('Building encoder and decoder ...')
-    # Initialize word embeddings
-    embedding = nn.Embedding(voc.num_words, C.hidden_size)
-    if C.loadFilename:
-        embedding.load_state_dict(embedding_sd)
-    # Initialize encoder & decoder models
-    encoder = Encoder(C.hidden_size, embedding, C.encoder_n_layers, C.dropout)
-    decoder = Decoder(C.attn_model, embedding, C.hidden_size, voc.num_words, C.decoder_n_layers, C.dropout)
-    if C.loadFilename:
-        encoder.load_state_dict(encoder_sd)
-        decoder.load_state_dict(decoder_sd)
-    # Use appropriate device
-    encoder = encoder.to(device)
+    init_path()
+
+    writer = SummaryWriter(C.log_dpath)
+
+    dataset = MSVD_dataset(C)
+    vocab = dataset.vocab
+    train_data_loader = iter(dataset.train_data_loader)
+    print('n_vocabs: {}, n_words: {}'.format(vocab.n_vocabs, vocab.n_words))
+
+    embedding = nn.Embedding(vocab.n_vocabs, C.word_embedding_size)
+
+    decoder = Decoder(
+        attn_model=C.attn_model,
+        encoder_output_size=C.encoder_output_size,
+        embedding=embedding,
+        embedding_dropout=C.embedding_dropout,
+        input_size=C.word_embedding_size,
+        hidden_size=C.decoder_hidden_size,
+        output_size=vocab.n_vocabs,
+        n_layers=C.decoder_n_layers,
+        dropout=C.decoder_dropout)
     decoder = decoder.to(device)
-    print('Models built and ready to go!')
-    
-   
-    # Ensure dropout layers are in train mode
-    encoder.train()
     decoder.train()
-    
-    # Initialize optimizers
-    print('Building optimizers ...')
-    encoder_optimizer = optim.Adam(encoder.parameters(), lr=C.learning_rate)
     decoder_optimizer = optim.Adam(decoder.parameters(), lr=C.learning_rate * C.decoder_learning_ratio)
-    if C.loadFilename:
-        encoder_optimizer.load_state_dict(encoder_optimizer_sd)
-        decoder_optimizer.load_state_dict(decoder_optimizer_sd)
     
-    # Run training iterations
-    print("Starting Training!")
-    
-     # Load batches for each iteration
-    training_batches = [batch2TrainData(voc, [random.choice(pairs) for _ in range(C.batch_size)])
-                      for _ in range(C.n_iteration)]
+    losses = []
+    decoder_losses = []
+    for iteration in range(1, C.n_iteration + 1):
+        try:
+            batch = next(train_data_loader)
+        except StopIteration:
+            train_data_loader = iter(dataset.train_data_loader)
+            batch = next(train_data_loader)
 
-    # Initializations
-    print('Initializing ...')
-    start_iteration = 1
-    print_loss = 0
-    if C.loadFilename:
-        start_iteration = checkpoint['iteration'] + 1
+        decoder_optimizer.zero_grad()
 
-    # Training loop
-    print("Training...")
-    for iteration in range(start_iteration, C.n_iteration + 1):
-        training_batch = training_batches[iteration - 1]
-        # Extract fields from batch
-        input_variable, lengths, target_variable, mask, max_target_len = training_batch
+        encoder_outputs, targets, target_masks, target_max_n_words = batch
+        """
+        print("encoder_outputs: ", encoder_outputs)
+        print("targets: ", targets)
+        print("target_masks: ", target_masks)
+        print("target_max_n_words: ", target_max_n_words)
+        assert 0
+        """
 
-        # Run a training iteration with batch
-        loss = train(input_variable, lengths, target_variable, mask, max_target_len, encoder,
-                     decoder, embedding, encoder_optimizer, decoder_optimizer)
-        print_loss += loss
+        decoder_loss, decoder_loss_val, _ = forward_decoder(encoder_outputs, targets, target_masks,
+                                                            target_max_n_words, decoder, embedding, is_train=True)
+
+        # Perform backpropatation
+        loss = decoder_loss
+        loss.backward()
+        _ = torch.nn.utils.clip_grad_norm_(decoder.parameters(), C.clip)
+        decoder_optimizer.step()
+
+        loss_val = decoder_loss_val
+        losses.append(loss_val)
+        decoder_losses.append(decoder_loss_val)
 
         # Print progress
-        if iteration % C.print_every == 0:
-            print_loss_avg = print_loss / C.print_every
-            print("Iteration: {}; Percent complete: {:.1f}%; Average loss: {:.4f}".format(iteration, iteration / C.n_iteration * 100, print_loss_avg))
-            print_loss = 0
+        if iteration % C.log_every == 0:
+            loss_avg = np.mean(losses)
+            decoder_loss_avg = np.mean(decoder_losses)
+
+            writer.add_scalar(C.tx_train_loss, loss_avg, iteration)
+            writer.add_scalar(C.tx_train_loss_decoder, decoder_loss_avg, iteration)
+            print("Iter {} / {} ({:.2f}%): loss {:.3f} | decoder_loss {:.3f}".format(
+                iteration, C.n_iteration, iteration / C.n_iteration * 100, loss_avg, decoder_loss_avg))
+            losses = []
+            decoder_losses = []
+
+        # Validate model
+        if iteration % C.validate_every == 0:
+            losses = []
+            decoder_losses = []
+            gt_captions = []
+            pred_captions = []
+            for batch in iter(dataset.val_data_loader):
+                encoder_outputs, targets, target_masks, target_max_n_words = batch
+
+                _, decoder_loss_val, preds = forward_decoder(encoder_outputs, targets, target_masks,
+                                                             target_max_n_words, decoder, embedding,
+                                                             is_train=False)
+
+                loss_val = decoder_loss_val
+
+                losses.append(loss_val)
+                decoder_losses.append(decoder_loss_val)
+                gt_captions += convert_preds_to_captions(targets.numpy())
+                pred_captions += convert_preds_to_captions(preds.numpy())
+            loss_avg = np.mean(losses)
+            decoder_loss_avg = np.mean(decoder_losses)
+
+            writer.add_scalar(C.tx_val_loss, loss_avg, iteration)
+            writer.add_scalar(C.tx_val_loss_decoder, decoder_loss_avg, iteration)
+            print("[Validation] Iter {} / {} ({:.2f}%): loss {:.3f} | decoder_loss {:.3f}".format(
+                iteration, C.n_iteration, iteration / C.n_iteration * 100, loss_avg, decoder_loss_avg))
+
+            caption_pairs = [ (gt, pred) for gt, pred in zip(gt_captions, pred_captions) ]
+            caption_pairs = caption_pairs[:C.n_logs]
+            caption_log = "\n\n".join([ "[GT] {}  \n[PR] {}".format(gt, pred) for gt, pred in caption_pairs ])
+            writer.add_text(C.tx_predicted_captions, caption_log, iteration)
+
 
         # Save checkpoint
-        if (iteration % C.save_every == 0):
-            directory = os.path.join(C.save_dir, C.model_name, C.corpus_name, '{}-{}_{}'.format(C.encoder_n_layers, C.decoder_n_layers, C.hidden_size))
-            if not os.path.exists(directory):
-                os.makedirs(directory)
+        if iteration % C.save_every == 0:
+            fpath = os.path.join(C.save_dpath, "{}_checkpoint.tar".format(iteration))
+
             torch.save({
                 'iteration': iteration,
-                'en': encoder.state_dict(),
-                'de': decoder.state_dict(),
-                'en_opt': encoder_optimizer.state_dict(),
-                'de_opt': decoder_optimizer.state_dict(),
+                'dec': decoder.state_dict(),
+                'dec_opt': decoder_optimizer.state_dict(),
                 'loss': loss,
-                'voc_dict': voc.__dict__,
                 'embedding': embedding.state_dict()
-            }, os.path.join(directory, '{}_{}.tar'.format(iteration, 'checkpoint')))
+            }, fpath)
 

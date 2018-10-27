@@ -4,22 +4,25 @@ import torch.nn.functional as F
 
 
 class Attn(nn.Module):
-    def __init__(self, method, hidden_size):
+    def __init__(self, method, hidden_size, attn_size):
         super(Attn, self).__init__()
+
         self.method = method
         if self.method not in ['dot', 'general', 'concat']:
             raise ValueError(self.method, "is not an appropriate attention method.")
         self.hidden_size = hidden_size
+        self.attn_size = attn_size
         if self.method == 'general':
-            self.attn = nn.Linear(self.hidden_size, hidden_size)
+            self.attn = nn.Linear(self.hidden_size, self.attn_size)
         elif self.method == 'concat':
-            self.attn = nn.Linear(self.hidden_size * 2, hidden_size)
-            self.v = nn.Parameter(torch.FloatTensor(hidden_size))
+            self.attn = nn.Linear(self.hidden_size + self.attn_size, self.attn_size)
+            self.v = nn.Parameter(torch.FloatTensor(self.attn_size))
 
     def dot_score(self, hidden, encoder_output):
         return torch.sum(hidden * encoder_output, dim=2)
 
     def general_score(self, hidden, encoder_output):
+
         energy = self.attn(encoder_output)
         return torch.sum(hidden * energy, dim=2)
 
