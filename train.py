@@ -3,6 +3,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from itertools import cycle
+
 import numpy as np
 from tensorboardX import SummaryWriter
 import torch
@@ -19,11 +21,6 @@ from models.decoder import Decoder
 
 USE_CUDA = torch.cuda.is_available()
 device = torch.device("cuda" if USE_CUDA else "cpu")
-
-
-def init_path():
-    os.makedirs(C.log_dpath, exist_ok=True)
-    os.makedirs(C.save_dpath, exist_ok=True)
 
 
 def forward_decoder(encoder_outputs, target, target_mask, target_max_n_words, decoder, embedding, is_train):
@@ -86,14 +83,20 @@ def convert_preds_to_captions(preds):
     return pred_captions
 
 
-if __name__ == "__main__":
-    init_path()
+def sample_n(lst, n):
+    indices = list(range(len(lst)))
+    sample_indices = np.random.choice(indices, n, replace=False)
+    sample_lst = [ lst[i] for i in sample_indices ]
+    return sample_lst
 
+
+if __name__ == "__main__":
     writer = SummaryWriter(C.log_dpath)
 
     dataset = MSVD_dataset(C)
     vocab = dataset.vocab
-    train_data_loader = iter(dataset.train_data_loader)
+    train_data_loader = cycle(iter(dataset.train_data_loader))
+    val_data_loader = cycle(iter(dataset.val_data_loader))
     print('n_vocabs: {}, n_words: {}'.format(vocab.n_vocabs, vocab.n_words))
 
     embedding = nn.Embedding(vocab.n_vocabs, C.word_embedding_size)
@@ -114,12 +117,7 @@ if __name__ == "__main__":
     
     losses = []
     decoder_losses = []
-    for iteration in range(1, C.n_iteration + 1):
-        try:
-            batch = next(train_data_loader)
-        except StopIteration:
-            train_data_loader = iter(dataset.train_data_loader)
-            batch = next(train_data_loader)
+    for iteration, batch in enumerate(train_data_loader, 1):
 
         decoder_optimizer.zero_grad()
 
@@ -152,8 +150,8 @@ if __name__ == "__main__":
 
             writer.add_scalar(C.tx_train_loss, loss_avg, iteration)
             writer.add_scalar(C.tx_train_loss_decoder, decoder_loss_avg, iteration)
-            print("Iter {} / {} ({:.2f}%): loss {:.3f} | decoder_loss {:.3f}".format(
-                iteration, C.n_iteration, iteration / C.n_iteration * 100, loss_avg, decoder_loss_avg))
+            print("Iter {} / {} ({:.1f}%): loss {:.3f} | decoder_loss {:.3f}".format(
+                iteration, C.train_n_iteration, iteration / C.train_n_iteration * 100, loss_avg, decoder_loss_avg))
             losses = []
             decoder_losses = []
 
@@ -163,7 +161,7 @@ if __name__ == "__main__":
             decoder_losses = []
             gt_captions = []
             pred_captions = []
-            for batch in iter(dataset.val_data_loader):
+            for i, batch in enumerate(val_data_loader):
                 encoder_outputs, targets, target_masks, target_max_n_words = batch
 
                 _, decoder_loss_val, preds = forward_decoder(encoder_outputs, targets, target_masks,
@@ -176,22 +174,27 @@ if __name__ == "__main__":
                 decoder_losses.append(decoder_loss_val)
                 gt_captions += convert_preds_to_captions(targets.numpy())
                 pred_captions += convert_preds_to_captions(preds.numpy())
+
+                if i == C.val_n_iteration:
+                    break
             loss_avg = np.mean(losses)
             decoder_loss_avg = np.mean(decoder_losses)
 
             writer.add_scalar(C.tx_val_loss, loss_avg, iteration)
             writer.add_scalar(C.tx_val_loss_decoder, decoder_loss_avg, iteration)
             print("[Validation] Iter {} / {} ({:.2f}%): loss {:.3f} | decoder_loss {:.3f}".format(
-                iteration, C.n_iteration, iteration / C.n_iteration * 100, loss_avg, decoder_loss_avg))
+                iteration, C.train_n_iteration, iteration / C.train_n_iteration * 100, loss_avg, decoder_loss_avg))
 
             caption_pairs = [ (gt, pred) for gt, pred in zip(gt_captions, pred_captions) ]
-            caption_pairs = caption_pairs[:C.n_logs]
+            caption_pairs = sample_n(caption_pairs, C.n_val_logs)
             caption_log = "\n\n".join([ "[GT] {}  \n[PR] {}".format(gt, pred) for gt, pred in caption_pairs ])
             writer.add_text(C.tx_predicted_captions, caption_log, iteration)
 
 
         # Save checkpoint
         if iteration % C.save_every == 0:
+            if not os.path.exists(C.save_dpath):
+                os.makedirs(C.save_dpath)
             fpath = os.path.join(C.save_dpath, "{}_checkpoint.tar".format(iteration))
 
             torch.save({
@@ -201,4 +204,7 @@ if __name__ == "__main__":
                 'loss': loss,
                 'embedding': embedding.state_dict()
             }, fpath)
+
+        if iteration == C.train_n_iteration:
+            break
 

@@ -1,7 +1,11 @@
 **/__pycache__
 
+checkpoints/
+
 data/
 
 dataset/
 
 eval.py
+
+logs/

@@ -34,13 +34,14 @@ class TrainConfig:
     val_video_fpath = "data/{}/features/{}_val.hdf5".format(corpus_name, encoder_model_name)
     val_caption_fpath = "data/{}/metadata/val.csv".format(corpus_name)
     caption_n_max_word = 30
-    batch_size = 40
+    batch_size = 100
+    val_n_iteration = 1
     shuffle = True
-    num_workers = 40
+    num_workers = 10
 
     """ Train """
-    n_iteration = 1000000
-    learning_rate = 1e-4
+    train_n_iteration = 100000
+    learning_rate = 1e-6
     clip = 50.0 # Gradient clipping
 
     """ Encoder """
@@ -65,16 +66,15 @@ class TrainConfig:
 
     """ Log """
     log_every = 100
-    save_every = 100000
+    validate_every = 1000
+    n_val_logs = 3
+    save_every = 10000
     timestamp = time.strftime("%y%m%d-%H:%M:%S", time.gmtime())
-    model_id = "{} | enc_{} | dec_LSTM-{} | emb_{} | {} | {}".format(
-        model_name, encoder_model_name, decoder_n_layers, word_embedding_size, corpus_name, timestamp)
+    model_id = "{} | {} | enc_{} | dec_LSTM-{} | emb_{} | lr-{} | bs-{} | dec-tf-{} | {}".format(
+        model_name, corpus_name, encoder_model_name, decoder_n_layers, word_embedding_size, learning_rate,
+        batch_size, decoder_teacher_forcing_ratio, timestamp)
     log_dpath = "logs/{}".format(model_id)
     save_dpath = "checkpoints/{}".format(model_id)
-
-    """ Validation """
-    validate_every = 10000
-    n_logs = 3
 
     """ TensorboardX """
     tx_train_loss = "loss/train/total"
