@@ -13,7 +13,7 @@ class Decoder(nn.Module):
         # Define layers
         self.embedding = embedding
         self.embedding_dropout = nn.Dropout(embedding_dropout)
-        self.gru = nn.GRU(input_size, hidden_size, n_layers, dropout=dropout)
+        self.lstm = nn.LSTM(input_size, hidden_size, n_layers, dropout=dropout)
         self.concat = nn.Linear(encoder_output_size + hidden_size, hidden_size)
         self.out = nn.Linear(hidden_size, output_size)
 
@@ -26,14 +26,14 @@ class Decoder(nn.Module):
         embedded = self.embedding(last_word)
         embedded = self.embedding_dropout(embedded)
 
-        rnn_output, hidden = self.gru(embedded, last_hidden)
+        output, hidden = self.lstm(embedded, last_hidden)
 
-        attn_weights = self.attn(rnn_output, encoder_outputs)
+        attn_weights = self.attn(output, encoder_outputs)
         context = attn_weights.bmm(encoder_outputs.transpose(0, 1))
 
-        rnn_output = rnn_output.squeeze(0)
+        output = output.squeeze(0)
         context = context.squeeze(1)
-        concat_input = torch.cat((rnn_output, context), 1)
+        concat_input = torch.cat((output, context), 1)
         concat_output = torch.tanh(self.concat(concat_input))
         output = self.out(concat_output)
         output = F.softmax(output, dim=1)

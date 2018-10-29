@@ -4,8 +4,8 @@ checkpoints/
 
 data/
 
-dataset/
-
 eval.py
 
 logs/
+
+rsync.sh
