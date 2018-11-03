@@ -30,10 +30,15 @@ class ZeroPadIfLessThan:
 
 
 class ToTensor:
+    def __init__(self, dtype=None):
+        self.dtype = dtype
     
     def __call__(self, array):
         np_array = np.asarray(array)
-        return torch.from_numpy(np_array)
+        t = torch.from_numpy(np_array)
+        if self.dtype:
+            t = t.type(self.dtype)
+        return t
 
 
 class RemovePunctuation:
@@ -62,6 +67,32 @@ class Truncate:
 
     def __call__(self, words):
         return words[:self.n_word]
+
+
+class PadFirst:
+    def __init__(self, token):
+        self.token = token
+
+    def __call__(self, words):
+        return [ self.token ] + words
+
+
+class PadLast:
+    def __init__(self, token):
+        self.token = token
+
+    def __call__(self, words):
+        return words + [ self.token ]
+
+
+class PadToLength:
+    def __init__(self, token, length):
+        self.token = token
+        self.length = length
+
+    def __call__(self, words):
+        n_pads = self.length - len(words)
+        return words + [ self.token ] * n_pads
 
 
 class ToIndex:

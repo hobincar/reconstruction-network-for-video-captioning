@@ -16,22 +16,13 @@ from torch import optim
 
 from config import TrainConfig as C
 from dataset.MSVD import MSVD as MSVD_dataset
-from models.attn_decoder import Decoder
+from models.decoder import Decoder
+# from models.attn_decoder import Decoder
+from models.local_reconstructor import LocalReconstructor
 from models.global_reconstructor import GlobalReconstructor
 
 
-USE_CUDA = torch.cuda.is_available()
-device = torch.device("cuda" if USE_CUDA else "cpu")
-
-torch.multiprocessing.set_sharing_strategy('file_system')
-
-
-def forward_decoder(encoder_outputs, targets, target_masks, target_max_n_words, decoder, loss_func, is_train):
-    # Set device options
-    encoder_outputs = encoder_outputs.to(device)
-    targets = targets.to(device)
-    target_masks = target_masks.to(device)
-
+def forward_decoder(encoder_outputs, targets, target_masks, decoder, loss_func, is_train):
     # Initialize variables
     loss = 0
     n_totals = 0
@@ -39,44 +30,51 @@ def forward_decoder(encoder_outputs, targets, target_masks, target_max_n_words, 
     output_indices = []
 
     # Create initial decoder input (start with SOS tokens for each sentence)
-    input = torch.LongTensor([[ C.init_word2idx['<SOS>'] for _ in range(C.batch_size) ]])
-    input = input.to(device)
+    input = torch.LongTensor([ [C.init_word2idx['<SOS>'] for _ in range(C.batch_size)] ])
+    input = input.to(C.device)
 
-    hidden = torch.zeros(C.decoder_n_layers, C.batch_size, C.decoder_hidden_size)
-    context = torch.zeros(C.decoder_n_layers, C.batch_size, C.decoder_hidden_size)
-    hidden = hidden.to(device)
-    context = context.to(device)
+    if C.decoder_model == "LSTM":
+        hidden = (
+            torch.zeros(C.decoder_n_layers, C.batch_size, C.decoder_hidden_size).to(C.device),
+            torch.zeros(C.decoder_n_layers, C.batch_size, C.decoder_hidden_size).to(C.device),
+        )
+    else:
+        hidden = torch.zeros(C.decoder_n_layers, C.batch_size, C.decoder_hidden_size)
+        hidden = hidden.to(C.device)
 
     # Determine if we are using teacher forcing this iteration
-    use_teacher_forcing = random.random() < C.decoder_teacher_forcing_ratio
+    use_teacher_forcing = is_train and random.random() <= C.decoder_teacher_forcing_ratio
 
     # Forward batch of sequences through decoder one time step at a time
-    for t in range(target_max_n_words):
-        output, (hidden, context), _ = decoder(
-            input, (hidden, context), encoder_outputs
-        )
-        if is_train and use_teacher_forcing:
-            # Teacher forcing: next input is current target
+    for t in range(C.caption_n_max_word + 1):
+        output, hidden = decoder(input, hidden, encoder_outputs)
+
+        if use_teacher_forcing:
             input = targets[t].view(1, -1)
         else:
-            # No teacher forcing: next input is decoder's own current output
             _, topi = output.topk(1)
             output_index = [ topi[i][0] for i in range(C.batch_size) ]
             input = torch.LongTensor([ output_index ])
-            input = input.to(device)
+            input = input.to(C.device)
             output_indices.append(output_index)
 
         # Calculate and accumulate loss
         masked_output = output[target_masks[t]]
         masked_target = targets[t][target_masks[t]]
         masked_loss = loss_func(masked_output, masked_target)
-        n_total = target_masks[t].sum().item()
+        n_total = target_masks[t].sum()
 
         loss += masked_loss
         n_totals += n_total
-        hiddens.append(hidden)
+        if C.decoder_model == "LSTM":
+            hiddens.append(hidden[0])
+        else:
+            hiddens.append(hidden)
+
+        if t == C.caption_n_max_word or torch.all(target_masks[t+1] == 0):
+            break
     loss /= n_totals
-    loss = loss.to(device)
+    loss = loss.to(C.device)
 
     hiddens = torch.stack(hiddens)
     output_indices = torch.LongTensor(output_indices)
@@ -84,15 +82,14 @@ def forward_decoder(encoder_outputs, targets, target_masks, target_max_n_words, 
 
 
 def forward_global_reconstructor(decoder_hiddens, targets, reconstructor, loss_func):
-    decoder_hiddens = decoder_hiddens.to(device)
-    targets = targets.to(device)
+    decoder_hiddens = decoder_hiddens.to(C.device)
+    targets = targets.to(C.device)
 
     hidden = (
-        torch.zeros(C.reconstructor_n_layers, C.batch_size, C.reconstructor_hidden_size).to(device),
-        torch.zeros(C.reconstructor_n_layers, C.batch_size, C.reconstructor_hidden_size).to(device),
+        torch.zeros(C.reconstructor_n_layers, C.batch_size, C.reconstructor_hidden_size).to(C.device),
+        torch.zeros(C.reconstructor_n_layers, C.batch_size, C.reconstructor_hidden_size).to(C.device),
     )
 
-    # decoder_hiddens: (MAX_LEN, C.decoder_n_layers, C.batch_size, C.decoder_hidden_size)
     outputs = []
     decoder_max_n_words = decoder_hiddens.size()[0]
     for t in range(decoder_max_n_words):
@@ -115,7 +112,7 @@ def convert_idxs_to_sentences(idxs, idx2word):
     for idxs in idxs_list:
         sentences.append([])
         for idx in idxs:
-            if idx == 0: break
+            if idx == C.init_word2idx['<EOS>']: break
             sentences[-1].append(idx2word[idx])
         sentences[-1] = " ".join(sentences[-1])
     return sentences
@@ -128,9 +125,9 @@ def sample_n(lst, n):
     return sample_lst
 
 
-def dec_rec_step(batch, decoder, decoder_loss_func, decoder_optimizer, reconstructor, reconstructor_loss_func,
-                 reconstructor_optimizer, is_train):
-    encoder_outputs, targets, target_masks, target_max_n_words = batch
+def dec_rec_step(batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimizer, reconstructor,
+                 reconstructor_loss_func, reconstructor_lambda, reconstructor_optimizer, loss_lambda, is_train):
+    encoder_outputs, targets = batch
 
     if is_train:
         decoder.train()
@@ -138,7 +135,7 @@ def dec_rec_step(batch, decoder, decoder_loss_func, decoder_optimizer, reconstru
     else:
         decoder.eval()
     decoder_loss, decoder_hiddens, decoder_output_indices = forward_decoder(
-        encoder_outputs, targets, target_masks, target_max_n_words, decoder, decoder_loss_func, is_train=is_train)
+        encoder_outputs, targets, target_masks, decoder, decoder_loss_func, is_train=is_train)
 
     if is_train:
         reconstructor.train()
@@ -151,12 +148,17 @@ def dec_rec_step(batch, decoder, decoder_loss_func, decoder_optimizer, reconstru
     else:
         raise NotImplementedError("Unknown reconstructor type '{}'".format(C.reconstructor_type))
 
-    loss = decoder_loss + C.loss_lambda * recon_loss
+    decoder_reg_loss = sum([ torch.norm(param) for param in decoder.parameters() ])
+    decoder_loss = decoder_loss + decoder_lambda * decoder_reg_loss
+    recon_reg_loss = sum([ torch.norm(param) for param in reconstructor.parameters() ])
+    recon_loss = recon_loss + reconsturctor_lambda * recon_reg_loss
+    loss = decoder_loss + loss_lambda * recon_loss
 
     # Perform backpropatation
     if is_train:
         loss.backward()
-        # _ = torch.nn.utils.clip_grad_norm_(decoder.parameters(), C.clip)
+        if C.use_gradient_clip:
+            torch.nn.utils.clip_grad_norm_(decoder.parameters(), C.clip)
         decoder_optimizer.step()
         reconstructor_optimizer.step()
 
@@ -166,8 +168,10 @@ def dec_rec_step(batch, decoder, decoder_loss_func, decoder_optimizer, reconstru
     return loss, decoder_loss, decoder_output_indices, recon_loss
 
 
-def dec_step(batch, decoder, decoder_loss_func, decoder_optimizer, is_train):
-    encoder_outputs, targets, target_masks, target_max_n_words = batch
+def dec_step(batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimizer, is_train):
+    encoder_outputs, targets = batch
+    targets = targets.long()
+    target_masks = targets > C.init_word2idx['<PAD>']
 
     if is_train:
         decoder.train()
@@ -176,12 +180,15 @@ def dec_step(batch, decoder, decoder_loss_func, decoder_optimizer, is_train):
         decoder.eval()
 
     decoder_loss, decoder_hiddens, decoder_output_indices = forward_decoder(
-        encoder_outputs, targets, target_masks, target_max_n_words, decoder, decoder_loss_func, is_train=is_train)
+        encoder_outputs, targets, target_masks, decoder, decoder_loss_func, is_train=is_train)
+    decoder_reg_loss = sum([ torch.norm(param) for param in decoder.parameters() ])
+    decoder_loss = decoder_loss + decoder_lambda * decoder_reg_loss
 
     # Perform backpropatation
     if is_train:
         decoder_loss.backward()
-        # _ = torch.nn.utils.clip_grad_norm_(decoder.parameters(), C.clip)
+        if C.use_gradient_clip:
+            torch.nn.utils.clip_grad_norm_(decoder.parameters(), C.clip)
         decoder_optimizer.step()
 
     decoder_loss = decoder_loss.item()
@@ -193,46 +200,65 @@ def main():
     a.add_argument("--debug", "-D", action="store_true")
     args = a.parse_args()
 
-    print("MODEL ID: {}".format(C.model_id))
+    print("MODEL ID: {}".format(C.id))
     print("DEBUG MODE: {}".format(['OFF', 'ON'][args.debug]))
 
     if not args.debug:
-        writer = SummaryWriter(C.log_dpath)
+        train_writer = SummaryWriter(C.train_log_dpath)
+        val_writer = SummaryWriter(C.val_log_dpath)
 
     dataset = MSVD_dataset(C)
     vocab = dataset.vocab
     train_data_loader = cycle(iter(dataset.train_data_loader))
     val_data_loader = cycle(iter(dataset.val_data_loader))
-    print('n_vocabs: {} ({}), n_words: {} ({}). (): before trim (min_count: {})'.format(
+    print('n_vocabs: {} ({}), n_words: {} ({}). MIN_COUNT: {}'.format(
         vocab.n_vocabs, vocab.n_vocabs_untrimmed, vocab.n_words, vocab.n_words_untrimmed, C.min_count))
 
     decoder = Decoder(
+        model_name=C.decoder_model,
         n_layers=C.decoder_n_layers,
         encoder_size=C.encoder_output_size,
-        embedding_size=C.word_embedding_size,
+        embedding_size=C.embedding_size,
+        embedding_scale=C.embedding_scale,
         hidden_size=C.decoder_hidden_size,
         output_size=vocab.n_vocabs,
         embedding_dropout=C.embedding_dropout,
         dropout=C.decoder_dropout,
+        out_dropout=C.decoder_out_dropout,
         max_length=C.encoder_output_len,
     )
-    decoder = decoder.to(device)
-    decoder_loss_func = nn.NLLLoss()
-    decoder_optimizer = optim.Adam(decoder.parameters(), lr=C.learning_rate * C.decoder_learning_ratio)
+    decoder = decoder.to(C.device)
+    decoder_loss_func = nn.CrossEntropyLoss()
+    decoder_optimizer = optim.Adam(decoder.parameters(), lr=C.decoder_learning_rate,
+                                   weight_decay=C.decoder_weight_decay, amsgrad=C.decoder_use_amsgrad)
+    decoder_lambda = torch.autograd.Variable(torch.tensor(0.001), requires_grad=True)
+    decoder_lambda = decoder_lambda.to(C.device)
 
 
     if C.use_recon:
-        if C.reconstructor_type == "global":
+        if C.reconstructor_type == "local":
+            reconstructor = LocalReconstructor(
+                n_layers=C.reconstructor_n_layers,
+                hidden_size=C.reconstructor_hidden_size,
+                dropout=C.reconstructor_dropout,
+            )
+        elif C.reconstructor_type == "global":
             reconstructor = GlobalReconstructor(
                 n_layers=C.reconstructor_n_layers,
                 decoder_hidden_size=C.decoder_hidden_size,
                 hidden_size=C.reconstructor_hidden_size,
                 dropout=C.reconstructor_dropout,
             )
-        reconstructor = reconstructor.to(device)
+        reconstructor = reconstructor.to(C.device)
         reconstructor_loss_func = nn.MSELoss()
-        reconstructor_optimizer = optim.Adam(reconstructor.parameters(), lr=C.learning_rate * C.reconstructor_learning_ratio)
-    
+        reconstructor_optimizer = optim.Adam(reconstructor.parameters(), lr=C.reconstructor_learning_rate,
+                                             weight_decay=C.reconstructor_weight_decay,
+                                             amsgrad=C.reconstructor_use_amsgrad)
+        reconstructor_lambda = torch.autograd.Variable(torch.tensor(0.01), requires_grad=True)
+        reconstructor_lambda = reconstructor_lambda.to(C.device)
+        loss_lambda = torch.autograd.Variable(torch.tensor(1.), requires_grad=True)
+        loss_lambda = loss_lambda.to(C.device)
+
     train_loss = 0
     if C.use_recon:
         train_dec_loss = 0
@@ -241,12 +267,12 @@ def main():
         # Train
         if C.use_recon:
             loss, decoder_loss, _, recon_loss = dec_rec_step(
-                batch, decoder, decoder_loss_func, decoder_optimizer, reconstructor, reconstructor_loss_func,
-                reconstructor_optimizer, is_train=True)
+                batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimizer, reconstructor,
+                reconstructor_loss_func, reconstructor_lambda, reconstructor_optimizer, loss_lambda, is_train=True)
             train_dec_loss += decoder_loss
             train_rec_loss += recon_loss
         else:
-            loss, _ = dec_step(batch, decoder, decoder_loss_func, decoder_optimizer, is_train=True)
+            loss, _ = dec_step(batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimizer, is_train=True)
         train_loss += loss
 
 
@@ -258,10 +284,13 @@ def main():
                 train_rec_loss /= C.log_every
 
             if not args.debug:
-                writer.add_scalar(C.tx_train_loss, train_loss, iteration)
+                train_writer.add_scalar(C.tx_loss, train_loss, iteration)
+                train_writer.add_scalar(C.tx_lambda_decoder, decoder_lambda.item(), iteration)
                 if C.use_recon:
-                    writer.add_scalar(C.tx_train_loss_decoder, train_dec_loss, iteration)
-                    writer.add_scalar(C.tx_train_loss_reconstructor, train_rec_loss, iteration)
+                    train_writer.add_scalar(C.tx_loss_decoder, train_dec_loss, iteration)
+                    train_writer.add_scalar(C.tx_loss_reconstructor, train_rec_loss, iteration)
+                    train_writer.add_scalar(C.tx_lambda_reconstructor, reconstructor_lambda.item(), iteration)
+                    train_writer.add_scalar(C.tx_lambda, loss_lambda.item(), iteration)
 
             if C.use_recon:
                 print("Iter {} / {} ({:.1f}%): loss {:.5f} (dec {:.5f} + rec {:.5f})".format(
@@ -288,18 +317,18 @@ def main():
                 # Validate
                 if C.use_recon:
                     loss, decoder_loss, decoder_output_indices, recon_loss = dec_rec_step(
-                        batch, decoder, decoder_loss_func, decoder_optimizer, reconstructor,
-                        reconstructor_loss_func, reconstructor_optimizer, is_train=False)
+                        batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimizer, reconstructor,
+                        reconstructor_loss_func, reconstructor_lambda, reconstructor_optimizer, is_train=False)
                     val_dec_loss += decoder_loss
                     val_rec_loss += recon_loss
                 else:
-                    loss, decoder_output_indices = dec_step(batch, decoder, decoder_loss_func, decoder_optimizer,
-                        is_train=False)
+                    loss, decoder_output_indices = dec_step(batch, decoder, decoder_loss_func, decoder_lambda,
+                                                            decoder_optimizer, is_train=False)
                 val_loss += loss
 
-                _, targets, _, _ = batch
-                gt_idxs = targets.numpy()
-                pd_idxs = decoder_output_indices.numpy()
+                _, targets = batch
+                gt_idxs = targets.cpu().numpy()
+                pd_idxs = decoder_output_indices.cpu().numpy()
                 gt_captions += convert_idxs_to_sentences(gt_idxs, vocab.idx2word)
                 pd_captions += convert_idxs_to_sentences(pd_idxs, vocab.idx2word)
 
@@ -318,15 +347,15 @@ def main():
                     iteration, C.train_n_iteration, iteration / C.train_n_iteration * 100, val_loss))
 
             caption_pairs = [ (gt, pred) for gt, pred in zip(gt_captions, pd_captions) ]
-            caption_pairs = sample_n(caption_pairs, C.n_val_logs)
+            caption_pairs = sample_n(caption_pairs, min(C.n_val_logs, C.batch_size))
             caption_log = "\n\n".join([ "[GT] {}  \n[PD] {}".format(gt, pd) for gt, pd in caption_pairs ])
 
             if not args.debug:
-                writer.add_scalar(C.tx_val_loss, val_loss, iteration)
+                val_writer.add_scalar(C.tx_loss, val_loss, iteration)
                 if C.use_recon:
-                    writer.add_scalar(C.tx_val_loss_decoder, val_dec_loss, iteration)
-                    writer.add_scalar(C.tx_val_loss_reconstructor, val_rec_loss, iteration)
-                writer.add_text(C.tx_predicted_captions, caption_log, iteration)
+                    val_writer.add_scalar(C.tx_loss_decoder, val_dec_loss, iteration)
+                    val_writer.add_scalar(C.tx_loss_reconstructor, val_rec_loss, iteration)
+                val_writer.add_text(C.tx_predicted_captions, caption_log, iteration)
 
         # Save checkpoint
         if iteration % C.save_every == 0:

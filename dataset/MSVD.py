@@ -10,7 +10,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
 from dataset.transform import UniformSample, ZeroPadIfLessThan, ToTensor, RemovePunctuation, Lowercase, \
-                      SplitWithWhiteSpace, Truncate, ToIndex
+                              SplitWithWhiteSpace, Truncate, PadLast, PadToLength, ToIndex
 
 
 class MSVD:
@@ -19,7 +19,8 @@ class MSVD:
     def __init__(self, C):
         self.C = C
         self.vocab = None
-        self.data_loader = None
+        self.train_data_loader = None
+        self.val_data_loader = None
 
         self.transform_sentence = transforms.Compose([
             RemovePunctuation(),
@@ -41,41 +42,43 @@ class MSVD:
             self.C.min_count,
             transform=self.transform_sentence)
 
+    def collate_fn(self, batch):
+        encoder_outputs, targets = zip(*batch)
+
+        encoder_outputs = torch.stack(encoder_outputs)
+        targets = torch.stack(targets)
+
+        # FIXME: Got error when dtype is diff with others
+        encoder_outputs = encoder_outputs.float()
+        targets = targets.float()
+
+        """ (seq, batch, feature) """
+        # encoder_outputs = encoder_outputs.transpose(0, 1)
+        targets = targets.transpose(0, 1)
+
+        """ Device """
+        encoder_outputs = encoder_outputs.to(self.C.device)
+        targets = targets.to(self.C.device)
+
+        return encoder_outputs, targets
+                
     def build_data_loader(self):
-        def collate_fn(batch):
-            n_sample = len(batch)
-            frames = [ frame for frame, _ in batch ]
-            captions = [ caption.long() for _, caption in batch ]
-
-            # For a caption shorter than the longest one, pad with zeros
-            max_n_words = max([ len(caption) for caption in captions ])
-            new_captions = []
-            masks = []
-            for caption in captions:
-                n_words = len(caption)
-                n_pads = max_n_words - n_words
-                new_caption = torch.cat(( caption, torch.zeros(n_pads, dtype=torch.long) ))
-                mask = torch.cat(( torch.ones(n_words), torch.zeros(n_pads) )).byte()
-                new_captions.append(new_caption)
-                masks.append(mask)
-
-            batch_frames = torch.stack(frames, dim=0)
-            batch_captions = torch.stack(new_captions, dim=0).transpose(0, 1)
-            batch_masks = torch.stack(masks, dim=0).transpose(0, 1)
-
-            return batch_frames, batch_captions, batch_masks, max_n_words
-
+        """ Transformation """
         transform_frame=transforms.Compose([
             UniformSample(self.C.encoder_output_len),
             ZeroPadIfLessThan(self.C.encoder_output_len),
-            ToTensor(),
+            ToTensor(torch.float),
         ])
         transform_caption=transforms.Compose([
             self.transform_sentence,
             ToIndex(self.vocab.word2idx),
-            ToTensor(),
+            PadLast(self.vocab.word2idx['<EOS>']),
+            PadToLength(self.vocab.word2idx['<PAD>'], self.vocab.max_sentence_len + 1),
+            ToTensor(torch.long),
         ])
 
+
+        """ Train """
         train_dataset = MSVDDataset(
             self.C.train_video_fpath,
             self.C.train_caption_fpath,
@@ -87,9 +90,10 @@ class MSVD:
             batch_size=self.C.batch_size,
             shuffle=self.C.shuffle,
             num_workers=self.C.num_workers,
-            collate_fn=collate_fn,
-        )
+            collate_fn=self.collate_fn)
 
+
+        """ Validation """
         val_dataset = MSVDDataset(
             self.C.val_video_fpath,
             self.C.val_caption_fpath,
@@ -101,14 +105,13 @@ class MSVD:
             batch_size=self.C.batch_size,
             shuffle=self.C.shuffle,
             num_workers=self.C.num_workers,
-            collate_fn=collate_fn,
-        )
+            collate_fn=self.collate_fn)
 
 
 class MSVDVocab:
     """ MSVD Vocaburary """
 
-    def __init__(self, caption_fpath, init_word2idx, min_count=1, transform=None):
+    def __init__(self, caption_fpath, init_word2idx, min_count=1, transform=str.split):
         self.caption_fpath = caption_fpath
         self.min_count = min_count
         self.transform = transform
@@ -118,6 +121,7 @@ class MSVDVocab:
         self.word_freq_dict = defaultdict(lambda: 0)
         self.n_vocabs = len(self.word2idx)
         self.n_words = self.n_vocabs
+        self.max_sentence_len = -1
 
         self.build()
 
@@ -131,7 +135,8 @@ class MSVDVocab:
     def build(self):
         captions = self.load_captions()
         for caption in captions:
-            words = self.transform(caption) if self.transform else caption.split()
+            words = self.transform(caption)
+            self.max_sentence_len = max(self.max_sentence_len, len(words))
             for word in words:
                 self.word_freq_dict[word] += 1
         self.n_vocabs_untrimmed = len(self.word_freq_dict)
@@ -139,7 +144,7 @@ class MSVDVocab:
 
         keep_words = [ word for word, freq in self.word_freq_dict.items() if freq >= self.min_count ]
 
-        for idx, word in enumerate(keep_words):
+        for idx, word in enumerate(keep_words, len(self.word2idx)):
             self.word2idx[word] = idx
             self.idx2word[idx] = word
         self.n_vocabs = len(keep_words)
