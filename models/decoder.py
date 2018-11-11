@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 class Decoder(nn.Module):
     def __init__(self, model_name, n_layers, encoder_size, embedding_size, embedding_scale, hidden_size,
-                 output_size, embedding_dropout, dropout, out_dropout, max_length):
+                 output_size, embedding_dropout, dropout, out_dropout):
         super(Decoder, self).__init__()
         self.n_layers = n_layers
         self.encoder_size = encoder_size
@@ -16,7 +16,6 @@ class Decoder(nn.Module):
         self.embedding_dropout_p = embedding_dropout
         self.dropout_p = dropout
         self.out_dropout_p = out_dropout
-        self.max_length = max_length
 
         self.embedding = nn.Embedding(self.output_size, self.embedding_size)
         self.embedding_dropout = nn.Dropout(self.embedding_dropout_p)

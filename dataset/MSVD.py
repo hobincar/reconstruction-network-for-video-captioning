@@ -21,6 +21,7 @@ class MSVD:
         self.vocab = None
         self.train_data_loader = None
         self.val_data_loader = None
+        self.test_data_loader = None
 
         self.transform_sentence = transforms.Compose([
             RemovePunctuation(),
@@ -33,7 +34,7 @@ class MSVD:
 
     def build(self):
         self.build_vocab()
-        self.build_data_loader()
+        self.build_data_loaders()
 
     def build_vocab(self):
         self.vocab = MSVDVocab(
@@ -43,33 +44,33 @@ class MSVD:
             transform=self.transform_sentence)
 
     def collate_fn(self, batch):
-        encoder_outputs, targets = zip(*batch)
+        videos, captions = zip(*batch)
 
-        encoder_outputs = torch.stack(encoder_outputs)
-        targets = torch.stack(targets)
+        videos = torch.stack(videos)
+        captions = torch.stack(captions)
 
         # FIXME: Got error when dtype is diff with others
-        encoder_outputs = encoder_outputs.float()
-        targets = targets.float()
+        videos = videos.float()
+        captions = captions.float()
 
         """ (seq, batch, feature) """
-        # encoder_outputs = encoder_outputs.transpose(0, 1)
-        targets = targets.transpose(0, 1)
+        # videos = videos.transpose(0, 1)
+        captions = captions.transpose(0, 1)
 
         """ Device """
-        encoder_outputs = encoder_outputs.to(self.C.device)
-        targets = targets.to(self.C.device)
+        videos = videos.to(self.C.device)
+        captions = captions.to(self.C.device)
 
-        return encoder_outputs, targets
-                
-    def build_data_loader(self):
+        return videos, captions
+
+    def build_data_loaders(self):
         """ Transformation """
-        transform_frame=transforms.Compose([
+        self.transform_frame = transforms.Compose([
             UniformSample(self.C.encoder_output_len),
             ZeroPadIfLessThan(self.C.encoder_output_len),
             ToTensor(torch.float),
         ])
-        transform_caption=transforms.Compose([
+        self.transform_caption = transforms.Compose([
             self.transform_sentence,
             ToIndex(self.vocab.word2idx),
             PadLast(self.vocab.word2idx['<EOS>']),
@@ -77,35 +78,29 @@ class MSVD:
             ToTensor(torch.long),
         ])
 
+        if self.C.build_train_data_loader:
+            self.train_data_loader = self.build_data_loader(self.C.train_video_fpath, self.C.train_caption_fpath)
+        if self.C.build_val_data_loader:
+            self.val_data_loader = self.build_data_loader(self.C.val_video_fpath, self.C.val_caption_fpath)
+        if self.C.build_test_data_loader:
+            self.test_data_loader = self.build_data_loader(self.C.test_video_fpath, self.C.test_caption_fpath)
 
-        """ Train """
-        train_dataset = MSVDDataset(
-            self.C.train_video_fpath,
-            self.C.train_caption_fpath,
-            transform_frame=transform_frame,
-            transform_caption=transform_caption)
 
-        self.train_data_loader = DataLoader(
-            train_dataset,
+    def build_data_loader(self, video_fpath, caption_fpath):
+        dataset = MSVDDataset(
+            video_fpath,
+            caption_fpath,
+            transform_frame=self.transform_frame,
+            transform_caption=self.transform_caption)
+
+        data_loader = DataLoader(
+            dataset,
             batch_size=self.C.batch_size,
             shuffle=self.C.shuffle,
             num_workers=self.C.num_workers,
             collate_fn=self.collate_fn)
 
-
-        """ Validation """
-        val_dataset = MSVDDataset(
-            self.C.val_video_fpath,
-            self.C.val_caption_fpath,
-            transform_frame=transform_frame,
-            transform_caption=transform_caption)
-
-        self.val_data_loader = DataLoader(
-            val_dataset,
-            batch_size=self.C.batch_size,
-            shuffle=self.C.shuffle,
-            num_workers=self.C.num_workers,
-            collate_fn=self.collate_fn)
+        return data_loader
 
 
 class MSVDVocab:
@@ -147,7 +142,7 @@ class MSVDVocab:
         for idx, word in enumerate(keep_words, len(self.word2idx)):
             self.word2idx[word] = idx
             self.idx2word[idx] = word
-        self.n_vocabs = len(keep_words)
+        self.n_vocabs = len(self.word2idx)
         self.n_words = sum([ self.word_freq_dict[word] for word in keep_words ])
 
 

@@ -16,8 +16,8 @@ from torch import optim
 
 from config import TrainConfig as C
 from dataset.MSVD import MSVD as MSVD_dataset
-from models.decoder import Decoder
-# from models.attn_decoder import Decoder
+# from models.decoder import Decoder
+from models.attn_decoder import AttnDecoder as Decoder
 from models.local_reconstructor import LocalReconstructor
 from models.global_reconstructor import GlobalReconstructor
 
@@ -221,11 +221,11 @@ def main():
         embedding_size=C.embedding_size,
         embedding_scale=C.embedding_scale,
         hidden_size=C.decoder_hidden_size,
+        attn_size=C.decoder_attn_size,
         output_size=vocab.n_vocabs,
         embedding_dropout=C.embedding_dropout,
         dropout=C.decoder_dropout,
         out_dropout=C.decoder_out_dropout,
-        max_length=C.encoder_output_len,
     )
     decoder = decoder.to(C.device)
     decoder_loss_func = nn.CrossEntropyLoss()
@@ -371,6 +371,7 @@ def main():
                     'dec_opt': decoder_optimizer.state_dict(),
                     'rec_opt': reconstructor_optimizer.state_dict(),
                     'loss': loss,
+                    'config': dict(C.__dict__),
                 }, fpath)
             else:
                 torch.save({
@@ -378,6 +379,7 @@ def main():
                     'dec': decoder.state_dict(),
                     'dec_opt': decoder_optimizer.state_dict(),
                     'loss': loss,
+                    'config': dict(C.__dict__),
                 }, fpath)
 
         if iteration == C.train_n_iteration:
