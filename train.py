@@ -4,10 +4,11 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import argparse
-from itertools import cycle
+from collections import defaultdict
 import os
 import random
 
+from nlgeval import NLGEval
 import numpy as np
 from tensorboardX import SummaryWriter
 import torch
@@ -15,11 +16,12 @@ import torch.nn as nn
 from torch import optim
 
 from config import TrainConfig as C
-from dataset.MSVD import MSVD as MSVD_dataset
+from dataset.MSVD import MSVD as _MSVD
 # from models.decoder import Decoder
 from models.attn_decoder import AttnDecoder as Decoder
 from models.local_reconstructor import LocalReconstructor
 from models.global_reconstructor import GlobalReconstructor
+from utils import cycle, convert_idxs_to_sentences, sample_n
 
 
 def forward_decoder(encoder_outputs, targets, target_masks, decoder, loss_func, is_train):
@@ -71,7 +73,7 @@ def forward_decoder(encoder_outputs, targets, target_masks, decoder, loss_func, 
         else:
             hiddens.append(hidden)
 
-        if t == C.caption_n_max_word or torch.all(target_masks[t+1] == 0):
+        if t == C.caption_n_max_word:
             break
     loss /= n_totals
     loss = loss.to(C.device)
@@ -85,10 +87,14 @@ def forward_global_reconstructor(decoder_hiddens, targets, reconstructor, loss_f
     decoder_hiddens = decoder_hiddens.to(C.device)
     targets = targets.to(C.device)
 
-    hidden = (
-        torch.zeros(C.reconstructor_n_layers, C.batch_size, C.reconstructor_hidden_size).to(C.device),
-        torch.zeros(C.reconstructor_n_layers, C.batch_size, C.reconstructor_hidden_size).to(C.device),
-    )
+    if C.reconstructor_model == "LSTM":
+        hidden = (
+            torch.zeros(C.reconstructor_n_layers, C.batch_size, C.reconstructor_hidden_size).to(C.device),
+            torch.zeros(C.reconstructor_n_layers, C.batch_size, C.reconstructor_hidden_size).to(C.device),
+        )
+    else:
+        hidden = torch.zeros(C.reconstructor_n_layers, C.batch_size, C.reconstructor_hidden_size)
+        hidden = hidden.to(C.device)
 
     outputs = []
     decoder_max_n_words = decoder_hiddens.size()[0]
@@ -106,29 +112,15 @@ def forward_global_reconstructor(decoder_hiddens, targets, reconstructor, loss_f
     return loss
 
 
-def convert_idxs_to_sentences(idxs, idx2word):
-    sentences = []
-    idxs_list = np.asarray(idxs).T
-    for idxs in idxs_list:
-        sentences.append([])
-        for idx in idxs:
-            if idx == C.init_word2idx['<EOS>']: break
-            sentences[-1].append(idx2word[idx])
-        sentences[-1] = " ".join(sentences[-1])
-    return sentences
-
-
-def sample_n(lst, n):
-    indices = list(range(len(lst)))
-    sample_indices = np.random.choice(indices, n, replace=False)
-    sample_lst = [ lst[i] for i in sample_indices ]
-    return sample_lst
-
-
 def dec_rec_step(batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimizer, reconstructor,
                  reconstructor_loss_func, reconstructor_lambda, reconstructor_optimizer, loss_lambda, is_train):
-    encoder_outputs, targets = batch
+    _, encoder_outputs, targets = batch
+    encoder_outputs = encoder_outputs.to(C.device)
+    targets = targets.to(C.device)
+    targets = targets.long()
+    target_masks = targets > C.init_word2idx['<PAD>']
 
+    """ Decoder """
     if is_train:
         decoder.train()
         decoder_optimizer.zero_grad()
@@ -137,6 +129,7 @@ def dec_rec_step(batch, decoder, decoder_loss_func, decoder_lambda, decoder_opti
     decoder_loss, decoder_hiddens, decoder_output_indices = forward_decoder(
         encoder_outputs, targets, target_masks, decoder, decoder_loss_func, is_train=is_train)
 
+    """ Reconstructor """
     if is_train:
         reconstructor.train()
         reconstructor_optimizer.zero_grad()
@@ -148,10 +141,11 @@ def dec_rec_step(batch, decoder, decoder_loss_func, decoder_lambda, decoder_opti
     else:
         raise NotImplementedError("Unknown reconstructor type '{}'".format(C.reconstructor_type))
 
+    """ Loss """
     decoder_reg_loss = sum([ torch.norm(param) for param in decoder.parameters() ])
     decoder_loss = decoder_loss + decoder_lambda * decoder_reg_loss
     recon_reg_loss = sum([ torch.norm(param) for param in reconstructor.parameters() ])
-    recon_loss = recon_loss + reconsturctor_lambda * recon_reg_loss
+    recon_loss = recon_loss + reconstructor_lambda * recon_reg_loss
     loss = decoder_loss + loss_lambda * recon_loss
 
     # Perform backpropatation
@@ -169,7 +163,9 @@ def dec_rec_step(batch, decoder, decoder_loss_func, decoder_lambda, decoder_opti
 
 
 def dec_step(batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimizer, is_train):
-    encoder_outputs, targets = batch
+    _, encoder_outputs, targets = batch
+    encoder_outputs = encoder_outputs.to(C.device)
+    targets = targets.to(C.device)
     targets = targets.long()
     target_masks = targets > C.init_word2idx['<PAD>']
 
@@ -206,14 +202,27 @@ def main():
     if not args.debug:
         train_writer = SummaryWriter(C.train_log_dpath)
         val_writer = SummaryWriter(C.val_log_dpath)
+        Bleu1_writer = SummaryWriter(C.Bleu1_log_dpath)
+        Bleu2_writer = SummaryWriter(C.Bleu2_log_dpath)
+        Bleu3_writer = SummaryWriter(C.Bleu3_log_dpath)
+        Bleu4_writer = SummaryWriter(C.Bleu4_log_dpath)
+        CIDEr_writer = SummaryWriter(C.CIDEr_log_dpath)
+        METEOR_writer = SummaryWriter(C.METEOR_log_dpath)
+        ROUGE_L_writer = SummaryWriter(C.ROUGE_L_log_dpath)
 
-    dataset = MSVD_dataset(C)
-    vocab = dataset.vocab
-    train_data_loader = cycle(iter(dataset.train_data_loader))
-    val_data_loader = cycle(iter(dataset.val_data_loader))
+
+    """ Load DataLoader """
+    MSVD = _MSVD(C)
+    vocab = MSVD.vocab
+    train_data_loader = iter(cycle(MSVD.train_data_loader))
+    val_data_loader = iter(cycle(MSVD.val_data_loader))
+    test_data_loader = iter(cycle(MSVD.test_data_loader))
+
     print('n_vocabs: {} ({}), n_words: {} ({}). MIN_COUNT: {}'.format(
         vocab.n_vocabs, vocab.n_vocabs_untrimmed, vocab.n_words, vocab.n_words_untrimmed, C.min_count))
 
+
+    """ Build Decoder """
     decoder = Decoder(
         model_name=C.decoder_model,
         n_layers=C.decoder_n_layers,
@@ -235,6 +244,7 @@ def main():
     decoder_lambda = decoder_lambda.to(C.device)
 
 
+    """ Build Reconstructor """
     if C.use_recon:
         if C.reconstructor_type == "local":
             reconstructor = LocalReconstructor(
@@ -244,6 +254,7 @@ def main():
             )
         elif C.reconstructor_type == "global":
             reconstructor = GlobalReconstructor(
+                model_name=C.reconstructor_model,
                 n_layers=C.reconstructor_n_layers,
                 decoder_hidden_size=C.decoder_hidden_size,
                 hidden_size=C.reconstructor_hidden_size,
@@ -259,12 +270,20 @@ def main():
         loss_lambda = torch.autograd.Variable(torch.tensor(1.), requires_grad=True)
         loss_lambda = loss_lambda.to(C.device)
 
+
+    """ Build Qualitative Metrics """
+    nlgeval = NLGEval(no_skipthoughts=True, no_glove=True)
+    reference_captions = defaultdict(lambda: [])
+    for vid, _, caption in MSVD.test_dataset.video_caption_pairs:
+        reference_captions[vid].append(caption)
+
+
+    """ Train """
     train_loss = 0
     if C.use_recon:
         train_dec_loss = 0
         train_rec_loss = 0
     for iteration, batch in enumerate(train_data_loader, 1):
-        # Train
         if C.use_recon:
             loss, decoder_loss, _, recon_loss = dec_rec_step(
                 batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimizer, reconstructor,
@@ -276,7 +295,7 @@ def main():
         train_loss += loss
 
 
-        # Print progress
+        """ Log Train Progress """
         if args.debug or iteration % C.log_every == 0:
             train_loss /= C.log_every
             if C.use_recon:
@@ -306,37 +325,40 @@ def main():
                 train_rec_loss = 0
 
 
-        # Validate model
+        """ Log Validation Progress """
         if args.debug or iteration % C.validate_every == 0:
             val_loss = 0
             val_dec_loss = 0
             val_rec_loss = 0
             gt_captions = []
             pd_captions = []
-            for i, batch in enumerate(val_data_loader, 1):
-                # Validate
+            for batch in val_data_loader:
                 if C.use_recon:
                     loss, decoder_loss, decoder_output_indices, recon_loss = dec_rec_step(
                         batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimizer, reconstructor,
-                        reconstructor_loss_func, reconstructor_lambda, reconstructor_optimizer, is_train=False)
-                    val_dec_loss += decoder_loss
-                    val_rec_loss += recon_loss
+                        reconstructor_loss_func, reconstructor_lambda, reconstructor_optimizer, loss_lambda,
+                        is_train=False)
+                    val_dec_loss += decoder_loss * C.batch_size
+                    val_rec_loss += recon_loss * C.batch_size
                 else:
                     loss, decoder_output_indices = dec_step(batch, decoder, decoder_loss_func, decoder_lambda,
                                                             decoder_optimizer, is_train=False)
-                val_loss += loss
+                val_loss += loss * C.batch_size
 
-                _, targets = batch
+                _, _, targets = batch
                 gt_idxs = targets.cpu().numpy()
                 pd_idxs = decoder_output_indices.cpu().numpy()
-                gt_captions += convert_idxs_to_sentences(gt_idxs, vocab.idx2word)
-                pd_captions += convert_idxs_to_sentences(pd_idxs, vocab.idx2word)
+                gt_captions += convert_idxs_to_sentences(gt_idxs, vocab.idx2word, vocab.word2idx['<EOS>'])
+                pd_captions += convert_idxs_to_sentences(pd_idxs, vocab.idx2word, vocab.word2idx['<EOS>'])
 
-                if i == C.val_n_iteration:
+                if len(pd_captions) >= C.n_val:
+                    assert len(gt_captions) == len(pd_captions)
+                    gt_captions = gt_captions[:C.n_val]
+                    pd_captions = pd_captions[:C.n_val]
                     break
-            val_loss /= C.val_n_iteration
-            val_dec_loss /= C.val_n_iteration
-            val_rec_loss /= C.val_n_iteration
+            val_loss /= C.n_val
+            val_dec_loss /= C.n_val
+            val_rec_loss /= C.n_val
 
             if C.use_recon:
                 print("[Validation] Iter {} / {} ({:.1f}%): loss {:.5f} (dec {:.5f} + rec {:5f})".format(
@@ -357,7 +379,59 @@ def main():
                     val_writer.add_scalar(C.tx_loss_reconstructor, val_rec_loss, iteration)
                 val_writer.add_text(C.tx_predicted_captions, caption_log, iteration)
 
-        # Save checkpoint
+
+        """ Log Test Progress """
+        if args.debug or iteration % C.test_every == 0:
+            pd_vid_caption_pairs = []
+            for batch in test_data_loader:
+                if C.use_recon:
+                    _, _, decoder_output_indices, _ = dec_rec_step(
+                        batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimizer, reconstructor,
+                        reconstructor_loss_func, reconstructor_lambda, reconstructor_optimizer, loss_lambda,
+                        is_train=False)
+                else:
+                    _, decoder_output_indices = dec_step(batch, decoder, decoder_loss_func, decoder_lambda,
+                                                            decoder_optimizer, is_train=False)
+
+                vids, _, _ = batch
+                pd_idxs = decoder_output_indices.cpu().numpy()
+                pd_captions = convert_idxs_to_sentences(pd_idxs, vocab.idx2word, vocab.word2idx['<EOS>'])
+                pd_vid_caption_pairs += [ ( vid, caption ) for vid, caption in zip(vids, pd_captions) ]
+
+                if len(pd_vid_caption_pairs) >= C.n_test:
+                    pd_vid_caption_pairs = pd_vid_caption_pairs[:C.n_test]
+                    break
+            Bleu1, Bleu2, Bleu3, Bleu4, CIDEr, METEOR, ROUGE_L = 0, 0, 0, 0, 0, 0, 0
+            for vid, hypothesis_caption in pd_vid_caption_pairs:
+                score = nlgeval.compute_individual_metrics(reference_captions[vid], hypothesis_caption)
+                Bleu1 += score['Bleu_1']
+                Bleu2 += score['Bleu_2']
+                Bleu3 += score['Bleu_3']
+                Bleu4 += score['Bleu_4']
+                CIDEr += score['CIDEr']
+                METEOR += score['METEOR']
+                ROUGE_L += score['ROUGE_L']
+            Bleu1 /= C.n_test
+            Bleu2 /= C.n_test
+            Bleu3 /= C.n_test
+            Bleu4 /= C.n_test
+            CIDEr /= C.n_test
+            METEOR /= C.n_test
+            ROUGE_L /= C.n_test
+            print("[Test] Iter {} / {} ({:.1f}%): B1: {:.1f}, B2: {:.1f}, B3: {:.1f}, B4: {:.1f}, C: {:.1f}, M: {:.1f}, R: {:.1f}".format(
+                iteration, C.train_n_iteration, iteration / C.train_n_iteration * 100, Bleu1, Bleu2, Bleu3, Bleu4,
+                CIDEr, METEOR, ROUGE_L))
+            if not args.debug:
+                Bleu1_writer.add_scalar(C.tx_score_Bleu1, Bleu1, iteration)
+                Bleu2_writer.add_scalar(C.tx_score_Bleu2, Bleu2, iteration)
+                Bleu3_writer.add_scalar(C.tx_score_Bleu3, Bleu3, iteration)
+                Bleu4_writer.add_scalar(C.tx_score_Bleu4, Bleu4, iteration)
+                CIDEr_writer.add_scalar(C.tx_score_CIDEr, CIDEr, iteration)
+                METEOR_writer.add_scalar(C.tx_score_METEOR, METEOR, iteration)
+                ROUGE_L_writer.add_scalar(C.tx_score_ROUGE_L, ROUGE_L, iteration)
+
+
+        """ Save checkpoint """
         if iteration % C.save_every == 0:
             if not os.path.exists(C.save_dpath):
                 os.makedirs(C.save_dpath)
@@ -371,7 +445,7 @@ def main():
                     'dec_opt': decoder_optimizer.state_dict(),
                     'rec_opt': reconstructor_optimizer.state_dict(),
                     'loss': loss,
-                    'config': dict(C.__dict__),
+                    'config': C,
                 }, fpath)
             else:
                 torch.save({
@@ -379,7 +453,7 @@ def main():
                     'dec': decoder.state_dict(),
                     'dec_opt': decoder_optimizer.state_dict(),
                     'loss': loss,
-                    'config': dict(C.__dict__),
+                    'config': C,
                 }, fpath)
 
         if iteration == C.train_n_iteration:

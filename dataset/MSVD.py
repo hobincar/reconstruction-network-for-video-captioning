@@ -9,8 +9,9 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
-from dataset.transform import UniformSample, ZeroPadIfLessThan, ToTensor, RemovePunctuation, Lowercase, \
-                              SplitWithWhiteSpace, Truncate, PadLast, PadToLength, ToIndex
+from dataset.transform import UniformSample, RandomSample, UniformJitterSample, ZeroPadIfLessThan, ToTensor, \
+                              RemovePunctuation, Lowercase, SplitWithWhiteSpace, Truncate, PadLast, PadToLength, \
+                              ToIndex
 
 
 class MSVD:
@@ -19,8 +20,11 @@ class MSVD:
     def __init__(self, C):
         self.C = C
         self.vocab = None
+        self.train_dataset = None
         self.train_data_loader = None
+        self.val_dataset = None
         self.val_data_loader = None
+        self.test_dataset = None
         self.test_data_loader = None
 
         self.transform_sentence = transforms.Compose([
@@ -44,7 +48,14 @@ class MSVD:
             transform=self.transform_sentence)
 
     def collate_fn(self, batch):
-        videos, captions = zip(*batch)
+        vids, videos, captions = zip(*batch)
+
+        # Pad small batch
+        if len(vids) < self.C.batch_size:
+            pad_len = self.C.batch_size - len(vids)
+            vids = list(vids) + [ "PAD" ] * pad_len
+            videos = list(videos) + [ videos[-1].clone() ] * pad_len
+            captions = list(captions) + [ captions[-1].clone() ] * pad_len
 
         videos = torch.stack(videos)
         captions = torch.stack(captions)
@@ -53,20 +64,25 @@ class MSVD:
         videos = videos.float()
         captions = captions.float()
 
-        """ (seq, batch, feature) """
+        """ (batch, seq, feat) -> (seq, batch, feat) """
         # videos = videos.transpose(0, 1)
         captions = captions.transpose(0, 1)
 
-        """ Device """
-        videos = videos.to(self.C.device)
-        captions = captions.to(self.C.device)
-
-        return videos, captions
+        return vids, videos, captions
 
     def build_data_loaders(self):
         """ Transformation """
+        if self.C.frame_sampling_method == "uniform":
+            Sample = UniformSample
+        elif self.C.frame_sampling_method == "random":
+            Sample = RandomSample
+        elif self.C.frame_sampling_method == "uniform_jitter":
+            Sample = UniformJitterSample
+        else:
+            raise NotImplementedError("Unknown frame sampling method: {}".format(self.C.frame_sampling_method))
+
         self.transform_frame = transforms.Compose([
-            UniformSample(self.C.encoder_output_len),
+            Sample(self.C.encoder_output_len),
             ZeroPadIfLessThan(self.C.encoder_output_len),
             ToTensor(torch.float),
         ])
@@ -79,27 +95,32 @@ class MSVD:
         ])
 
         if self.C.build_train_data_loader:
-            self.train_data_loader = self.build_data_loader(self.C.train_video_fpath, self.C.train_caption_fpath)
+            self.train_dataset = self.build_dataset(self.C.train_video_fpath, self.C.train_caption_fpath)
+            self.train_data_loader = self.build_data_loader(self.train_dataset)
         if self.C.build_val_data_loader:
-            self.val_data_loader = self.build_data_loader(self.C.val_video_fpath, self.C.val_caption_fpath)
+            self.val_dataset = self.build_dataset(self.C.val_video_fpath, self.C.val_caption_fpath)
+            self.val_data_loader = self.build_data_loader(self.val_dataset)
         if self.C.build_test_data_loader:
-            self.test_data_loader = self.build_data_loader(self.C.test_video_fpath, self.C.test_caption_fpath)
+            self.test_dataset = self.build_dataset(self.C.test_video_fpath, self.C.test_caption_fpath)
+            self.test_data_loader = self.build_data_loader(self.test_dataset)
 
 
-    def build_data_loader(self, video_fpath, caption_fpath):
-        dataset = MSVDDataset(
+    def build_dataset(self, video_fpath, caption_fpath):
+         dataset = MSVDDataset(
             video_fpath,
             caption_fpath,
             transform_frame=self.transform_frame,
             transform_caption=self.transform_caption)
+         return dataset
 
+
+    def build_data_loader(self, dataset):
         data_loader = DataLoader(
             dataset,
             batch_size=self.C.batch_size,
             shuffle=self.C.shuffle,
             num_workers=self.C.num_workers,
             collate_fn=self.collate_fn)
-
         return data_loader
 
 
@@ -155,20 +176,21 @@ class MSVDDataset(Dataset):
         self.transform_frame = transform_frame
         self.transform_caption = transform_caption
 
+        self.video_caption_pairs = []
         self.build_video_caption_pairs()
 
     def __len__(self):
         return len(self.videos)
 
     def __getitem__(self, idx):
-        video, caption = self.video_caption_pairs[idx]
+        vid, video, caption = self.video_caption_pairs[idx]
 
         if self.transform_frame:
             video = self.transform_frame(video)
         if self.transform_caption:
             caption = self.transform_caption(caption)
 
-        return video, caption
+        return vid, video, caption
     
     def load_videos(self):
         fin = h5py.File(self.video_fpath, 'r')
@@ -199,6 +221,6 @@ class MSVDDataset(Dataset):
         for vid in self.videos:
             video = self.videos[vid]
             for caption in self.captions[vid]:
-                self.video_caption_pairs.append(( video, caption ))
+                self.video_caption_pairs.append(( vid, video, caption ))
         return self.video_caption_pairs
 

@@ -23,26 +23,33 @@ class SplitConfig:
 
 
 class TrainConfig:
+    decoder_model = "GRU" # [ "LSTM", "GRU" ]
+    frame_sampling_method = "uniform" # [ "uniform", "random", "uniform_jitter" ]
+    decoder_teacher_forcing_ratio = 0.5
+
+
     model = "RecNet"
     corpus = "MSVD" # [ "MSVD" ]
     encoder_model = "InceptionV4" # [ "InceptionV4" ]
-    decoder_model = "LSTM" # [ "LSTM", "GRU" ]
+    # decoder_model = "LSTM" # [ "LSTM", "GRU" ]
     device = "cuda"
 
     """ Data Loader """
     build_train_data_loader = True
     build_val_data_loader = True
-    build_test_data_loader = False
+    build_test_data_loader = True
     total_video_fpath = "data/{}/features/{}.hdf5".format(corpus, encoder_model)
     total_caption_fpath = "data/{}/metadata/MSR Video Description Corpus.csv".format(corpus)
     train_video_fpath = "data/{}/features/{}_train.hdf5".format(corpus, encoder_model)
     train_caption_fpath = "data/{}/metadata/train.csv".format(corpus)
     val_video_fpath = "data/{}/features/{}_val.hdf5".format(corpus, encoder_model)
     val_caption_fpath = "data/{}/metadata/val.csv".format(corpus)
+    test_video_fpath = "data/{}/features/{}_test.hdf5".format(corpus, encoder_model)
+    test_caption_fpath = "data/{}/metadata/test.csv".format(corpus)
     min_count = 5 # N_vocabs = 1: 13501 | 2: 7424 | 3: 5692 | 4: 4191 | 5: 4188
+    # frame_sampling_method = "uniform_jitter" # [ "uniform", "random", "uniform_jitter" ]
     caption_n_max_word = 30
     batch_size = 100
-    val_n_iteration = 1
     shuffle = True
     num_workers = 4
 
@@ -73,11 +80,12 @@ class TrainConfig:
     decoder_attn_size = 128
     decoder_dropout = 0.5
     decoder_out_dropout = 0.5
-    decoder_teacher_forcing_ratio = 1.0
+    # decoder_teacher_forcing_ratio = 1.0
 
     """ Reconstructor """
-    use_recon = False
-    reconstructor_type = "global"
+    use_recon = True
+    reconstructor_type = "global" # [ "global", "local" ]
+    reconstructor_model = "LSTM"
     reconstructor_n_layers = 1
     reconstructor_hidden_size = 1536
     reconstructor_dropout = 0
@@ -85,12 +93,16 @@ class TrainConfig:
     """ Log """
     log_every = 100
     validate_every = 1000
+    test_every = 10000
     save_every = 100000
     n_val_logs = 10
     timestamp = time.strftime("%y%m%d-%H:%M:%S", time.gmtime())
+    if corpus == "MSVD":
+        n_val = 100
+        n_test = 670
 
     """ ID """
-    corpus_id = "{} tc-{} mc-{}".format(corpus, caption_n_max_word, min_count)
+    corpus_id = "{} tc-{} mc-{} sp-{}".format(corpus, caption_n_max_word, min_count, frame_sampling_method)
     encoder_id = "ENC {} sm-{}".format(encoder_model, encoder_output_len)
     decoder_id = "DEC {}-{} at-{} dr-{}-{} tf-{} lr-{}-wd-{} op-{}".format(
         decoder_model.lower(), decoder_n_layers, decoder_attn_size, decoder_dropout, decoder_out_dropout,
@@ -106,15 +118,18 @@ class TrainConfig:
     if use_recon:
         id = " | ".join([ model, corpus_id, encoder_id, decoder_id, reconstructor_id, embedding_id,
                           hyperparams_id, timestamp ])
-        train_id = "{} | TRAIN".format(id)
-        val_id = "{} | VAL".format(id)
     else:
         id = " | ".join([ model, corpus_id, encoder_id, decoder_id, embedding_id, hyperparams_id,
                           timestamp ])
-        train_id = "{} | TRAIN".format(id)
-        val_id = "{} | VAL".format(id)
-    train_log_dpath = "logs/{}".format(train_id)
-    val_log_dpath = "logs/{}".format(val_id)
+    train_log_dpath = "logs/{} | TRAIN".format(id)
+    val_log_dpath = "logs/{} | VAL".format(id)
+    Bleu1_log_dpath = "logs/{} | BLEU-1".format(id)
+    Bleu2_log_dpath = "logs/{} | BLEU-2".format(id)
+    Bleu3_log_dpath = "logs/{} | BLEU-3".format(id)
+    Bleu4_log_dpath = "logs/{} | BLEU-4".format(id)
+    CIDEr_log_dpath = "logs/{} | CIDEr".format(id)
+    METEOR_log_dpath = "logs/{} | METEOR".format(id)
+    ROUGE_L_log_dpath = "logs/{} | ROUGE_L".format(id)
     save_dpath = "checkpoints/{}".format(id)
 
     """ TensorboardX """
@@ -125,6 +140,13 @@ class TrainConfig:
     tx_lambda_decoder = "lambda/decoder_regularizer"
     tx_lambda_reconstructor = "lambda/reconstructor_regularizer"
     tx_lambda = "lambda/reconstructor"
+    tx_score_Bleu1 = "score"
+    tx_score_Bleu2 = "score"
+    tx_score_Bleu3 = "score"
+    tx_score_Bleu4 = "score"
+    tx_score_CIDEr = "score"
+    tx_score_METEOR = "score"
+    tx_score_ROUGE_L = "score"
 
 
 class EvalConfig:

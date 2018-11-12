@@ -4,15 +4,24 @@ import torch.nn.functional as F
 
 
 class GlobalReconstructor(nn.Module):
-    def __init__(self, n_layers, decoder_hidden_size, hidden_size, dropout):
+    def __init__(self, model_name, n_layers, decoder_hidden_size, hidden_size, dropout):
         super(GlobalReconstructor, self).__init__()
+        self.model_name = model_name
         self.n_layers = n_layers
         self.decoder_hidden_size = decoder_hidden_size
         self.hidden_size = hidden_size
         self.dropout_p = dropout
 
-        self.combine = nn.Linear(self.decoder_hidden_size * 2, self.hidden_size)
-        self.lstm = nn.LSTM(self.hidden_size, self.hidden_size, self.n_layers, dropout=self.dropout_p)
+        if self.model_name == "LSTM":
+            rnn_unit = nn.LSTM
+        else:
+            rnn_unit = nn.GRU
+        self.rnn = rnn_unit(
+            input_size=self.decoder_hidden_size * 2,
+            hidden_size=self.hidden_size,
+            num_layers=self.n_layers,
+            dropout=self.dropout_p)
+
         self.out = nn.Linear(self.hidden_size, self.hidden_size)
 
     def forward(self, input, hidden, decoder_hiddens):
@@ -21,11 +30,10 @@ class GlobalReconstructor(nn.Module):
         mean_pooled = mean_pooled.mean(2)
         mean_pooled = mean_pooled.mean(2)
 
-        output = torch.cat((input[0], mean_pooled), 1)
-        output = self.combine(output).unsqueeze(0)
+        input_combined = torch.cat((input[0], mean_pooled), 1)
+        input_combined = input_combined.unsqueeze(0)
 
-        output = F.relu(output)
-        output, hidden = self.lstm(output, hidden)
+        output, hidden = self.rnn(input_combined, hidden)
 
         output = self.out(output[0])
         return output, hidden

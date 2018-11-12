@@ -1,3 +1,4 @@
+import math
 import re
 import string
 
@@ -13,8 +14,41 @@ class UniformSample:
         n_frames = len(frames)
         if n_frames < self.n_sample:
             return frames
-        
+
         sample_indices = [ int(i) for i in np.linspace(0, n_frames-1, self.n_sample) ]
+        samples = [ frames[i] for i in sample_indices ]
+        return samples
+
+
+class RandomSample:
+    def __init__(self, n_sample):
+        self.n_sample = n_sample
+
+    def __call__(self, frames):
+        n_frames = len(frames)
+        if n_frames < self.n_sample:
+            return frames
+        
+        sample_indices = sorted(np.random.choice(n_frames, self.n_sample, replace=False))
+        samples = [ frames[i] for i in sample_indices ]
+        return samples
+
+
+class UniformJitterSample:
+    def __init__(self, n_sample):
+        self.n_sample = n_sample
+
+    def __call__(self, frames):
+        n_frames = len(frames)
+        if n_frames < self.n_sample:
+            return frames
+
+        jitter_std = int(math.sqrt(n_frames / self.n_sample / 2 / 2))
+
+        sample_indices = [ int(i) for i in np.linspace(0, n_frames-1, self.n_sample) ]
+        sample_indices = [ int(i + np.random.normal(0, jitter_std)) for i in sample_indices ]
+        sample_indices = [ min(max(0, i), n_frames-1) for i in sample_indices ]
+        sample_indices = sorted(sample_indices)
         samples = [ frames[i] for i in sample_indices ]
         return samples
 
