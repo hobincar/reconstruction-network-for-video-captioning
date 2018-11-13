@@ -24,8 +24,7 @@ class SplitConfig:
 
 class TrainConfig:
     decoder_model = "GRU" # [ "LSTM", "GRU" ]
-    frame_sampling_method = "uniform" # [ "uniform", "random", "uniform_jitter" ]
-    decoder_teacher_forcing_ratio = 0.5
+    reconstructor_model = "GRU" # [ "LSTM", "GRU" ]
 
 
     model = "RecNet"
@@ -47,8 +46,8 @@ class TrainConfig:
     test_video_fpath = "data/{}/features/{}_test.hdf5".format(corpus, encoder_model)
     test_caption_fpath = "data/{}/metadata/test.csv".format(corpus)
     min_count = 5 # N_vocabs = 1: 13501 | 2: 7424 | 3: 5692 | 4: 4191 | 5: 4188
-    # frame_sampling_method = "uniform_jitter" # [ "uniform", "random", "uniform_jitter" ]
-    caption_n_max_word = 30
+    frame_sampling_method = "uniform_jitter" # [ "uniform", "random", "uniform_jitter" ]
+    caption_max_len = 30
     batch_size = 100
     shuffle = True
     num_workers = 4
@@ -80,15 +79,16 @@ class TrainConfig:
     decoder_attn_size = 128
     decoder_dropout = 0.5
     decoder_out_dropout = 0.5
-    # decoder_teacher_forcing_ratio = 1.0
+    decoder_teacher_forcing_ratio = 1.0
 
     """ Reconstructor """
     use_recon = True
     reconstructor_type = "global" # [ "global", "local" ]
-    reconstructor_model = "LSTM"
+    # reconstructor_model = "LSTM"
     reconstructor_n_layers = 1
     reconstructor_hidden_size = 1536
-    reconstructor_dropout = 0
+    reconstructor_decoder_dropout = 0.5
+    reconstructor_dropout = 0.5
 
     """ Log """
     log_every = 100
@@ -102,7 +102,7 @@ class TrainConfig:
         n_test = 670
 
     """ ID """
-    corpus_id = "{} tc-{} mc-{} sp-{}".format(corpus, caption_n_max_word, min_count, frame_sampling_method)
+    corpus_id = "{} tc-{} mc-{} sp-{}".format(corpus, caption_max_len, min_count, frame_sampling_method)
     encoder_id = "ENC {} sm-{}".format(encoder_model, encoder_output_len)
     decoder_id = "DEC {}-{} at-{} dr-{}-{} tf-{} lr-{}-wd-{} op-{}".format(
         decoder_model.lower(), decoder_n_layers, decoder_attn_size, decoder_dropout, decoder_out_dropout,

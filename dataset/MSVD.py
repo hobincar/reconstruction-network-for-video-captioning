@@ -31,7 +31,7 @@ class MSVD:
             RemovePunctuation(),
             Lowercase(),
             SplitWithWhiteSpace(),
-            Truncate(self.C.caption_n_max_word),
+            Truncate(self.C.caption_max_len),
         ])
 
         self.build()

@@ -17,8 +17,7 @@ from torch import optim
 
 from config import TrainConfig as C
 from dataset.MSVD import MSVD as _MSVD
-# from models.decoder import Decoder
-from models.attn_decoder import AttnDecoder as Decoder
+from models.decoder import Decoder
 from models.local_reconstructor import LocalReconstructor
 from models.global_reconstructor import GlobalReconstructor
 from utils import cycle, convert_idxs_to_sentences, sample_n
@@ -48,7 +47,7 @@ def forward_decoder(encoder_outputs, targets, target_masks, decoder, loss_func, 
     use_teacher_forcing = is_train and random.random() <= C.decoder_teacher_forcing_ratio
 
     # Forward batch of sequences through decoder one time step at a time
-    for t in range(C.caption_n_max_word + 1):
+    for t in range(C.caption_max_len + 1):
         output, hidden = decoder(input, hidden, encoder_outputs)
 
         if use_teacher_forcing:
@@ -73,7 +72,7 @@ def forward_decoder(encoder_outputs, targets, target_masks, decoder, loss_func, 
         else:
             hiddens.append(hidden)
 
-        if t == C.caption_n_max_word:
+        if t == C.caption_max_len or torch.all(target_masks[t+1] == 0):
             break
     loss /= n_totals
     loss = loss.to(C.device)
@@ -259,6 +258,8 @@ def main():
                 decoder_hidden_size=C.decoder_hidden_size,
                 hidden_size=C.reconstructor_hidden_size,
                 dropout=C.reconstructor_dropout,
+                decoder_dropout=C.reconstructor_decoder_dropout,
+                caption_max_len=C.caption_max_len,
             )
         reconstructor = reconstructor.to(C.device)
         reconstructor_loss_func = nn.MSELoss()
@@ -418,7 +419,7 @@ def main():
             CIDEr /= C.n_test
             METEOR /= C.n_test
             ROUGE_L /= C.n_test
-            print("[Test] Iter {} / {} ({:.1f}%): B1: {:.1f}, B2: {:.1f}, B3: {:.1f}, B4: {:.1f}, C: {:.1f}, M: {:.1f}, R: {:.1f}".format(
+            print("[Test] Iter {} / {} ({:.1f}%): B1: {:.3f}, B2: {:.3f}, B3: {:.3f}, B4: {:.3f}, C: {:.3f}, M: {:.3f}, R: {:.3f}".format(
                 iteration, C.train_n_iteration, iteration / C.train_n_iteration * 100, Bleu1, Bleu2, Bleu3, Bleu4,
                 CIDEr, METEOR, ROUGE_L))
             if not args.debug:
