@@ -8,7 +8,6 @@ from collections import defaultdict
 import os
 import random
 
-from nlgeval import NLGEval
 import numpy as np
 from tensorboardX import SummaryWriter
 import torch
@@ -17,6 +16,7 @@ from torch import optim
 
 from config import TrainConfig as C
 from dataset.MSVD import MSVD as _MSVD
+from eval import evaluate
 from models.decoder import Decoder
 from models.local_reconstructor import LocalReconstructor
 from models.global_reconstructor import GlobalReconstructor
@@ -199,15 +199,7 @@ def main():
     print("DEBUG MODE: {}".format(['OFF', 'ON'][args.debug]))
 
     if not args.debug:
-        train_writer = SummaryWriter(C.train_log_dpath)
-        val_writer = SummaryWriter(C.val_log_dpath)
-        Bleu1_writer = SummaryWriter(C.Bleu1_log_dpath)
-        Bleu2_writer = SummaryWriter(C.Bleu2_log_dpath)
-        Bleu3_writer = SummaryWriter(C.Bleu3_log_dpath)
-        Bleu4_writer = SummaryWriter(C.Bleu4_log_dpath)
-        CIDEr_writer = SummaryWriter(C.CIDEr_log_dpath)
-        METEOR_writer = SummaryWriter(C.METEOR_log_dpath)
-        ROUGE_L_writer = SummaryWriter(C.ROUGE_L_log_dpath)
+        summary_writer = SummaryWriter(C.log_dpath)
 
 
     """ Load DataLoader """
@@ -215,7 +207,6 @@ def main():
     vocab = MSVD.vocab
     train_data_loader = iter(cycle(MSVD.train_data_loader))
     val_data_loader = iter(cycle(MSVD.val_data_loader))
-    test_data_loader = iter(cycle(MSVD.test_data_loader))
 
     print('n_vocabs: {} ({}), n_words: {} ({}). MIN_COUNT: {}'.format(
         vocab.n_vocabs, vocab.n_vocabs_untrimmed, vocab.n_words, vocab.n_words_untrimmed, C.min_count))
@@ -233,8 +224,7 @@ def main():
         output_size=vocab.n_vocabs,
         embedding_dropout=C.embedding_dropout,
         dropout=C.decoder_dropout,
-        out_dropout=C.decoder_out_dropout,
-    )
+        out_dropout=C.decoder_out_dropout)
     decoder = decoder.to(C.device)
     decoder_loss_func = nn.CrossEntropyLoss()
     decoder_optimizer = optim.Adam(decoder.parameters(), lr=C.decoder_learning_rate,
@@ -249,8 +239,7 @@ def main():
             reconstructor = LocalReconstructor(
                 n_layers=C.reconstructor_n_layers,
                 hidden_size=C.reconstructor_hidden_size,
-                dropout=C.reconstructor_dropout,
-            )
+                dropout=C.reconstructor_dropout)
         elif C.reconstructor_type == "global":
             reconstructor = GlobalReconstructor(
                 model_name=C.reconstructor_model,
@@ -259,8 +248,7 @@ def main():
                 hidden_size=C.reconstructor_hidden_size,
                 dropout=C.reconstructor_dropout,
                 decoder_dropout=C.reconstructor_decoder_dropout,
-                caption_max_len=C.caption_max_len,
-            )
+                caption_max_len=C.caption_max_len)
         reconstructor = reconstructor.to(C.device)
         reconstructor_loss_func = nn.MSELoss()
         reconstructor_optimizer = optim.Adam(reconstructor.parameters(), lr=C.reconstructor_learning_rate,
@@ -270,13 +258,6 @@ def main():
         reconstructor_lambda = reconstructor_lambda.to(C.device)
         loss_lambda = torch.autograd.Variable(torch.tensor(1.), requires_grad=True)
         loss_lambda = loss_lambda.to(C.device)
-
-
-    """ Build Qualitative Metrics """
-    nlgeval = NLGEval(no_skipthoughts=True, no_glove=True)
-    reference_captions = defaultdict(lambda: [])
-    for vid, _, caption in MSVD.test_dataset.video_caption_pairs:
-        reference_captions[vid].append(caption)
 
 
     """ Train """
@@ -304,13 +285,13 @@ def main():
                 train_rec_loss /= C.log_every
 
             if not args.debug:
-                train_writer.add_scalar(C.tx_loss, train_loss, iteration)
-                train_writer.add_scalar(C.tx_lambda_decoder, decoder_lambda.item(), iteration)
+                summary_writer.add_scalar(C.tx_loss, train_loss, iteration)
+                summary_writer.add_scalar(C.tx_lambda_decoder, decoder_lambda.item(), iteration)
                 if C.use_recon:
-                    train_writer.add_scalar(C.tx_loss_decoder, train_dec_loss, iteration)
-                    train_writer.add_scalar(C.tx_loss_reconstructor, train_rec_loss, iteration)
-                    train_writer.add_scalar(C.tx_lambda_reconstructor, reconstructor_lambda.item(), iteration)
-                    train_writer.add_scalar(C.tx_lambda, loss_lambda.item(), iteration)
+                    summary_writer.add_scalar(C.tx_loss_decoder, train_dec_loss, iteration)
+                    summary_writer.add_scalar(C.tx_loss_reconstructor, train_rec_loss, iteration)
+                    summary_writer.add_scalar(C.tx_lambda_reconstructor, reconstructor_lambda.item(), iteration)
+                    summary_writer.add_scalar(C.tx_lambda, loss_lambda.item(), iteration)
 
             if C.use_recon:
                 print("Iter {} / {} ({:.1f}%): loss {:.5f} (dec {:.5f} + rec {:.5f})".format(
@@ -374,62 +355,30 @@ def main():
             caption_log = "\n\n".join([ "[GT] {}  \n[PD] {}".format(gt, pd) for gt, pd in caption_pairs ])
 
             if not args.debug:
-                val_writer.add_scalar(C.tx_loss, val_loss, iteration)
+                summary_writer.add_scalar(C.tx_loss, val_loss, iteration)
                 if C.use_recon:
-                    val_writer.add_scalar(C.tx_loss_decoder, val_dec_loss, iteration)
-                    val_writer.add_scalar(C.tx_loss_reconstructor, val_rec_loss, iteration)
-                val_writer.add_text(C.tx_predicted_captions, caption_log, iteration)
+                    summary_writer.add_scalar(C.tx_loss_decoder, val_dec_loss, iteration)
+                    summary_writer.add_scalar(C.tx_loss_reconstructor, val_rec_loss, iteration)
+                summary_writer.add_text(C.tx_predicted_captions, caption_log, iteration)
 
 
         """ Log Test Progress """
-        if args.debug or iteration % C.test_every == 0:
+        if args.debug or iteration % C.test_every == 0: # TODO: Replace nlgeval to coco-caption
             pd_vid_caption_pairs = []
-            for batch in test_data_loader:
-                if C.use_recon:
-                    _, _, decoder_output_indices, _ = dec_rec_step(
-                        batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimizer, reconstructor,
-                        reconstructor_loss_func, reconstructor_lambda, reconstructor_optimizer, loss_lambda,
-                        is_train=False)
-                else:
-                    _, decoder_output_indices = dec_step(batch, decoder, decoder_loss_func, decoder_lambda,
-                                                            decoder_optimizer, is_train=False)
-
-                vids, _, _ = batch
-                pd_idxs = decoder_output_indices.cpu().numpy()
-                pd_captions = convert_idxs_to_sentences(pd_idxs, vocab.idx2word, vocab.word2idx['<EOS>'])
-                pd_vid_caption_pairs += [ ( vid, caption ) for vid, caption in zip(vids, pd_captions) ]
-
-                if len(pd_vid_caption_pairs) >= C.n_test:
-                    pd_vid_caption_pairs = pd_vid_caption_pairs[:C.n_test]
-                    break
-            Bleu1, Bleu2, Bleu3, Bleu4, CIDEr, METEOR, ROUGE_L = 0, 0, 0, 0, 0, 0, 0
-            for vid, hypothesis_caption in pd_vid_caption_pairs:
-                score = nlgeval.compute_individual_metrics(reference_captions[vid], hypothesis_caption)
-                Bleu1 += score['Bleu_1']
-                Bleu2 += score['Bleu_2']
-                Bleu3 += score['Bleu_3']
-                Bleu4 += score['Bleu_4']
-                CIDEr += score['CIDEr']
-                METEOR += score['METEOR']
-                ROUGE_L += score['ROUGE_L']
-            Bleu1 /= C.n_test
-            Bleu2 /= C.n_test
-            Bleu3 /= C.n_test
-            Bleu4 /= C.n_test
-            CIDEr /= C.n_test
-            METEOR /= C.n_test
-            ROUGE_L /= C.n_test
+            score_data_loader = iter(MSVD.score_data_loader)
+            scores = evaluate(C, MSVD, score_data_loader, decoder)
             print("[Test] Iter {} / {} ({:.1f}%): B1: {:.3f}, B2: {:.3f}, B3: {:.3f}, B4: {:.3f}, C: {:.3f}, M: {:.3f}, R: {:.3f}".format(
-                iteration, C.train_n_iteration, iteration / C.train_n_iteration * 100, Bleu1, Bleu2, Bleu3, Bleu4,
-                CIDEr, METEOR, ROUGE_L))
+                iteration, C.train_n_iteration, iteration / C.train_n_iteration * 100, scores['Bleu_1'],
+                scores['Bleu_2'], scores['Bleu_3'], scores['Bleu_4'], scores['CIDEr'], scores['METEOR'],
+                scores['ROUGE_L']))
             if not args.debug:
-                Bleu1_writer.add_scalar(C.tx_score_Bleu1, Bleu1, iteration)
-                Bleu2_writer.add_scalar(C.tx_score_Bleu2, Bleu2, iteration)
-                Bleu3_writer.add_scalar(C.tx_score_Bleu3, Bleu3, iteration)
-                Bleu4_writer.add_scalar(C.tx_score_Bleu4, Bleu4, iteration)
-                CIDEr_writer.add_scalar(C.tx_score_CIDEr, CIDEr, iteration)
-                METEOR_writer.add_scalar(C.tx_score_METEOR, METEOR, iteration)
-                ROUGE_L_writer.add_scalar(C.tx_score_ROUGE_L, ROUGE_L, iteration)
+                summary_writer.add_scalar(C.tx_score_Bleu1, scores['Bleu_1'], iteration)
+                summary_writer.add_scalar(C.tx_score_Bleu2, scores['Bleu_2'], iteration)
+                summary_writer.add_scalar(C.tx_score_Bleu3, scores['Bleu_3'], iteration)
+                summary_writer.add_scalar(C.tx_score_Bleu4, scores['Bleu_4'], iteration)
+                summary_writer.add_scalar(C.tx_score_CIDEr, scores['CIDEr'], iteration)
+                summary_writer.add_scalar(C.tx_score_METEOR, scores['METEOR'], iteration)
+                summary_writer.add_scalar(C.tx_score_ROUGE_L, scores['ROUGE_L'], iteration)
 
 
         """ Save checkpoint """

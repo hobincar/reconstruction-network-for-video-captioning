@@ -1,4 +1,6 @@
 **/__pycache__
+**/*.pyc
+**/*.swp
 
 checkpoints/
 
@@ -6,6 +8,14 @@ data/
 
 eval.py
 
-logs/
+*logs/
+
+lib/
+lib64/
+
+.env/
+.env2/
 
 rsync.sh
+
+pyvenv.cfg

@@ -23,20 +23,18 @@ class SplitConfig:
 
 
 class TrainConfig:
-    decoder_model = "GRU" # [ "LSTM", "GRU" ]
-    reconstructor_model = "GRU" # [ "LSTM", "GRU" ]
-
-
     model = "RecNet"
     corpus = "MSVD" # [ "MSVD" ]
     encoder_model = "InceptionV4" # [ "InceptionV4" ]
-    # decoder_model = "LSTM" # [ "LSTM", "GRU" ]
+    decoder_model = "GRU" # [ "LSTM", "GRU" ]
+    reconstructor_model = "GRU" # [ "LSTM", "GRU" ]
     device = "cuda"
 
     """ Data Loader """
     build_train_data_loader = True
     build_val_data_loader = True
     build_test_data_loader = True
+    build_score_data_loader = True
     total_video_fpath = "data/{}/features/{}.hdf5".format(corpus, encoder_model)
     total_caption_fpath = "data/{}/metadata/MSR Video Description Corpus.csv".format(corpus)
     train_video_fpath = "data/{}/features/{}_train.hdf5".format(corpus, encoder_model)
@@ -46,7 +44,7 @@ class TrainConfig:
     test_video_fpath = "data/{}/features/{}_test.hdf5".format(corpus, encoder_model)
     test_caption_fpath = "data/{}/metadata/test.csv".format(corpus)
     min_count = 5 # N_vocabs = 1: 13501 | 2: 7424 | 3: 5692 | 4: 4191 | 5: 4188
-    frame_sampling_method = "uniform_jitter" # [ "uniform", "random", "uniform_jitter" ]
+    frame_sampling_method = "uniform" # [ "uniform", "random", "uniform_jitter" ]
     caption_max_len = 30
     batch_size = 100
     shuffle = True
@@ -84,7 +82,6 @@ class TrainConfig:
     """ Reconstructor """
     use_recon = True
     reconstructor_type = "global" # [ "global", "local" ]
-    # reconstructor_model = "LSTM"
     reconstructor_n_layers = 1
     reconstructor_hidden_size = 1536
     reconstructor_decoder_dropout = 0.5
@@ -108,8 +105,8 @@ class TrainConfig:
         decoder_model.lower(), decoder_n_layers, decoder_attn_size, decoder_dropout, decoder_out_dropout,
         decoder_teacher_forcing_ratio, decoder_learning_rate, decoder_weight_decay,
         ["adam", "amsgrad"][decoder_use_amsgrad])
-    reconstructor_id = "REC lr-{}-wd-{} op-{}".format(
-        reconstructor_learning_rate, reconstructor_weight_decay, ["adam", "amsgrad"][reconstructor_use_amsgrad])
+    reconstructor_id = "REC {} lr-{}-wd-{} op-{}".format(
+        reconstructor_model, reconstructor_learning_rate, reconstructor_weight_decay, ["adam", "amsgrad"][reconstructor_use_amsgrad])
     embedding_id = "EMB {} dr-{} sc-{}".format(embedding_size, embedding_dropout, embedding_scale)
     hyperparams_id = "bs-{}".format(batch_size)
     if use_gradient_clip:
@@ -121,15 +118,7 @@ class TrainConfig:
     else:
         id = " | ".join([ model, corpus_id, encoder_id, decoder_id, embedding_id, hyperparams_id,
                           timestamp ])
-    train_log_dpath = "logs/{} | TRAIN".format(id)
-    val_log_dpath = "logs/{} | VAL".format(id)
-    Bleu1_log_dpath = "logs/{} | BLEU-1".format(id)
-    Bleu2_log_dpath = "logs/{} | BLEU-2".format(id)
-    Bleu3_log_dpath = "logs/{} | BLEU-3".format(id)
-    Bleu4_log_dpath = "logs/{} | BLEU-4".format(id)
-    CIDEr_log_dpath = "logs/{} | CIDEr".format(id)
-    METEOR_log_dpath = "logs/{} | METEOR".format(id)
-    ROUGE_L_log_dpath = "logs/{} | ROUGE_L".format(id)
+    log_dpath = "logs/{}".format(id)
     save_dpath = "checkpoints/{}".format(id)
 
     """ TensorboardX """
@@ -140,25 +129,27 @@ class TrainConfig:
     tx_lambda_decoder = "lambda/decoder_regularizer"
     tx_lambda_reconstructor = "lambda/reconstructor_regularizer"
     tx_lambda = "lambda/reconstructor"
-    tx_score_Bleu1 = "score"
-    tx_score_Bleu2 = "score"
-    tx_score_Bleu3 = "score"
-    tx_score_Bleu4 = "score"
-    tx_score_CIDEr = "score"
-    tx_score_METEOR = "score"
-    tx_score_ROUGE_L = "score"
+    tx_score_Bleu1 = "score/Bleu-1"
+    tx_score_Bleu2 = "score/Bleu-2"
+    tx_score_Bleu3 = "score/Bleu-3"
+    tx_score_Bleu4 = "score/Bleu-4"
+    tx_score_CIDEr = "score/CIDEr"
+    tx_score_METEOR = "score/METEOR"
+    tx_score_ROUGE_L = "score/ROUGE_L"
 
 
 class EvalConfig:
+    corpus = "MSVD"
+    encoder_model = "InceptionV4"
     device = "cuda"
 
     """ Data Loader """
-    test_video_fpath = lambda TC: "data/{}/features/{}_test.hdf5".format(TC.corpus, TC.encoder_model)
-    test_caption_fpath = lambda TC: "data/{}/metadata/test.csv".format(TC.corpus)
+    test_video_fpath = "data/{}/features/{}_test.hdf5".format(corpus, encoder_model)
+    test_caption_fpath = "data/{}/metadata/test.csv".format(corpus)
 
     """ Model """
     model_dpath = "checkpoints"
-    model_id = "RecNet | MSVD tc-30 mc-5 | ENC InceptionV4 sm-33 | DEC lstm-2 dr-0.5-0.5 tf-1.0 lr-0.0001-wd-1e-05 op-amsgrad | EMB 468 dr-0.5 sc-1 | bs-100 | cp-50.0 | 181105-11:49:01"
+    model_id = "RecNet | MSVD tc-30 mc-5 sp-uniform_jitter | ENC InceptionV4 sm-28 | DEC lstm-1 at-128 dr-0.5-0.5 tf-1.0 lr-0.0001-wd-1e-05 op-amsgrad | EMB 468 dr-0.5 sc-1 | bs-100 | cp-50.0 | 181113-18:06:19"
     model_iteration = 100000
     model_fpath = "{}/{}/{}_checkpoint.tar".format(model_dpath, model_id, model_iteration)
 

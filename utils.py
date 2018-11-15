@@ -15,7 +15,7 @@ def convert_idxs_to_sentences(idxs, idx2word, EOS_token):
         sentences.append([])
         for idx in idxs:
             if idx == EOS_token: break
-            sentences[-1].append(idx2word[idx])
+            sentences[-1].append(idx2word[idx.item()])
         sentences[-1] = " ".join(sentences[-1])
     return sentences
 

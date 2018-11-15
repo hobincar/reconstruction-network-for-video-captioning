@@ -26,6 +26,8 @@ class MSVD:
         self.val_data_loader = None
         self.test_dataset = None
         self.test_data_loader = None
+        self.score_dataset = None
+        self.score_data_laoder = None
 
         self.transform_sentence = transforms.Compose([
             RemovePunctuation(),
@@ -70,6 +72,25 @@ class MSVD:
 
         return vids, videos, captions
 
+    def score_collate_fn(self, batch):
+        vids, videos = zip(*batch)
+
+        # Pad small batch
+        if len(vids) < self.C.batch_size:
+            pad_len = self.C.batch_size - len(vids)
+            vids = list(vids) + [ "PAD" ] * pad_len
+            videos = list(videos) + [ videos[-1].clone() ] * pad_len
+
+        videos = torch.stack(videos)
+
+        # FIXME: Got error when dtype is diff with others
+        videos = videos.float()
+
+        """ (batch, seq, feat) -> (seq, batch, feat) """
+        # videos = videos.transpose(0, 1)
+
+        return vids, videos
+
     def build_data_loaders(self):
         """ Transformation """
         if self.C.frame_sampling_method == "uniform":
@@ -103,7 +124,9 @@ class MSVD:
         if self.C.build_test_data_loader:
             self.test_dataset = self.build_dataset(self.C.test_video_fpath, self.C.test_caption_fpath)
             self.test_data_loader = self.build_data_loader(self.test_dataset)
-
+        if self.C.build_score_data_loader:
+            self.score_dataset = self.build_score_dataset(self.C.test_video_fpath)
+            self.score_data_loader = self.build_score_data_loader(self.score_dataset)
 
     def build_dataset(self, video_fpath, caption_fpath):
          dataset = MSVDDataset(
@@ -113,6 +136,11 @@ class MSVD:
             transform_caption=self.transform_caption)
          return dataset
 
+    def build_score_dataset(self, video_fpath):
+         dataset = MSVDScoreDataset(
+            video_fpath,
+            transform_frame=self.transform_frame)
+         return dataset
 
     def build_data_loader(self, dataset):
         data_loader = DataLoader(
@@ -122,6 +150,16 @@ class MSVD:
             num_workers=self.C.num_workers,
             collate_fn=self.collate_fn)
         return data_loader
+
+    def build_score_data_loader(self, dataset):
+        data_loader = DataLoader(
+            dataset,
+            batch_size=self.C.batch_size,
+            shuffle=self.C.shuffle,
+            num_workers=self.C.num_workers,
+            collate_fn=self.score_collate_fn)
+        return data_loader
+
 
 
 class MSVDVocab:
@@ -180,7 +218,7 @@ class MSVDDataset(Dataset):
         self.build_video_caption_pairs()
 
     def __len__(self):
-        return len(self.videos)
+        return len(self.video_caption_pairs)
 
     def __getitem__(self, idx):
         vid, video, caption = self.video_caption_pairs[idx]
@@ -223,4 +261,42 @@ class MSVDDataset(Dataset):
             for caption in self.captions[vid]:
                 self.video_caption_pairs.append(( vid, video, caption ))
         return self.video_caption_pairs
+
+class MSVDScoreDataset(Dataset):
+    """ MSVD Dataset for Evaluation """
+
+    def __init__(self, video_fpath, transform_frame=None):
+        self.video_fpath = video_fpath
+        self.transform_frame = transform_frame
+
+        self.data = []
+        self.build_data()
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        vid, video = self.data[idx]
+
+        if self.transform_frame:
+            video = self.transform_frame(video)
+
+        return vid, video
+
+    def load_videos(self):
+        fin = h5py.File(self.video_fpath, 'r')
+        videos = {}
+        for vid in fin:
+            videos[vid] = fin[vid].value
+        self.videos = videos
+        return videos
+
+    def build_data(self):
+        self.load_videos()
+
+        self.data = []
+        for vid in self.videos:
+            video = self.videos[vid]
+            self.data.append(( vid, video ))
+        return self.data
 
