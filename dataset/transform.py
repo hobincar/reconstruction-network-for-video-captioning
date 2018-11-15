@@ -75,6 +75,12 @@ class ToTensor:
         return t
 
 
+class TrimExceptAscii:
+
+    def __call__(self, sentence):
+        return sentence.decode('ascii', 'ignore').encode('ascii')
+
+
 class RemovePunctuation:
     def __init__(self):
         self.regex = re.compile('[%s]' % re.escape(string.punctuation))

@@ -88,8 +88,8 @@ class TrainConfig:
     reconstructor_dropout = 0.5
 
     """ Log """
-    log_every = 100
-    validate_every = 1000
+    log_every = 500
+    validate_every = 2000
     test_every = 10000
     save_every = 100000
     n_val_logs = 10
@@ -122,10 +122,13 @@ class TrainConfig:
     save_dpath = "checkpoints/{}".format(id)
 
     """ TensorboardX """
-    tx_loss = "loss/total"
-    tx_loss_decoder = "loss/decoder"
-    tx_loss_reconstructor = "loss/reconstructor"
-    tx_predicted_captions = "Ground Truths v.s. Predicted Captions"
+    tx_train_loss = "loss/train/total"
+    tx_train_loss_decoder = "loss/train/decoder"
+    tx_train_loss_reconstructor = "loss/train/reconstructor"
+    tx_val_loss = "loss/val/total"
+    tx_val_loss_decoder = "loss/val/decoder"
+    tx_val_loss_reconstructor = "loss/val/reconstructor"
+    tx_predicted_captions = "Ground Truths (GT) v.s. Predicted Captions (PD)"
     tx_lambda_decoder = "lambda/decoder_regularizer"
     tx_lambda_reconstructor = "lambda/reconstructor_regularizer"
     tx_lambda = "lambda/reconstructor"

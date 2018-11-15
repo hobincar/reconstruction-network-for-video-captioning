@@ -10,8 +10,8 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
 from dataset.transform import UniformSample, RandomSample, UniformJitterSample, ZeroPadIfLessThan, ToTensor, \
-                              RemovePunctuation, Lowercase, SplitWithWhiteSpace, Truncate, PadLast, PadToLength, \
-                              ToIndex
+                              TrimExceptAscii, RemovePunctuation, Lowercase, SplitWithWhiteSpace, Truncate, PadLast, \
+                              PadToLength, ToIndex
 
 
 class MSVD:
@@ -30,6 +30,7 @@ class MSVD:
         self.score_data_laoder = None
 
         self.transform_sentence = transforms.Compose([
+            TrimExceptAscii(),
             RemovePunctuation(),
             Lowercase(),
             SplitWithWhiteSpace(),

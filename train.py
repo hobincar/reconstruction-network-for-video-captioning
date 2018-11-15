@@ -285,11 +285,11 @@ def main():
                 train_rec_loss /= C.log_every
 
             if not args.debug:
-                summary_writer.add_scalar(C.tx_loss, train_loss, iteration)
+                summary_writer.add_scalar(C.tx_train_loss, train_loss, iteration)
                 summary_writer.add_scalar(C.tx_lambda_decoder, decoder_lambda.item(), iteration)
                 if C.use_recon:
-                    summary_writer.add_scalar(C.tx_loss_decoder, train_dec_loss, iteration)
-                    summary_writer.add_scalar(C.tx_loss_reconstructor, train_rec_loss, iteration)
+                    summary_writer.add_scalar(C.tx_train_loss_decoder, train_dec_loss, iteration)
+                    summary_writer.add_scalar(C.tx_train_loss_reconstructor, train_rec_loss, iteration)
                     summary_writer.add_scalar(C.tx_lambda_reconstructor, reconstructor_lambda.item(), iteration)
                     summary_writer.add_scalar(C.tx_lambda, loss_lambda.item(), iteration)
 
@@ -355,10 +355,10 @@ def main():
             caption_log = "\n\n".join([ "[GT] {}  \n[PD] {}".format(gt, pd) for gt, pd in caption_pairs ])
 
             if not args.debug:
-                summary_writer.add_scalar(C.tx_loss, val_loss, iteration)
+                summary_writer.add_scalar(C.tx_val_loss, val_loss, iteration)
                 if C.use_recon:
-                    summary_writer.add_scalar(C.tx_loss_decoder, val_dec_loss, iteration)
-                    summary_writer.add_scalar(C.tx_loss_reconstructor, val_rec_loss, iteration)
+                    summary_writer.add_scalar(C.tx_val_loss_decoder, val_dec_loss, iteration)
+                    summary_writer.add_scalar(C.tx_val_loss_reconstructor, val_rec_loss, iteration)
                 summary_writer.add_text(C.tx_predicted_captions, caption_log, iteration)
 
 
