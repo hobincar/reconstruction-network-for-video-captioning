@@ -50,17 +50,6 @@ class TrainConfig:
     shuffle = True
     num_workers = 4
 
-    """ Train """
-    train_n_iteration = 100000
-    decoder_learning_rate = 1e-4
-    reconstructor_learning_rate = 1e-6
-    decoder_weight_decay = 1e-5
-    reconstructor_weight_decay = 1e-5
-    decoder_use_amsgrad = True
-    reconstructor_use_amsgrad = False
-    use_gradient_clip = True
-    clip = 50.0 # Gradient clipping
-
     """ Word Embedding """
     init_word2idx = { '<PAD>': 0, '<SOS>': 1, '<EOS>': 2 }
     embedding_size = 468
@@ -81,11 +70,28 @@ class TrainConfig:
 
     """ Reconstructor """
     use_recon = True
-    reconstructor_type = "global" # [ "global", "local" ]
-    reconstructor_n_layers = 1
-    reconstructor_hidden_size = 1536
-    reconstructor_decoder_dropout = 0.5
-    reconstructor_dropout = 0.5
+    if use_recon:
+        reconstructor_type = "global" # [ "global", "local" ]
+        reconstructor_n_layers = 1
+        reconstructor_hidden_size = 1536
+        reconstructor_decoder_dropout = 0.5
+        reconstructor_dropout = 0.5
+
+    """ Train """
+    train_n_iteration = 100000
+    decoder_learning_rate = 1e-4
+    reconstructor_learning_rate = 1e-6
+    decoder_weight_decay = 1e-5
+    reconstructor_weight_decay = 1e-5
+    decoder_use_amsgrad = True
+    reconstructor_use_amsgrad = False
+    use_gradient_clip = True
+    clip = 50.0 # Gradient clipping
+
+    """ Test """
+    search_method = "beam" # [ "greedy", "beam" ]
+    if search_method == "beam":
+        beam_width = 10
 
     """ Log """
     log_every = 500
@@ -111,6 +117,10 @@ class TrainConfig:
     hyperparams_id = "bs-{}".format(batch_size)
     if use_gradient_clip:
         hyperparams_id = "{} | cp-{}".format(hyperparams_id, clip)
+    if search_method == "greedy":
+        hyperparams_id = "{} | sm-gr".format(hyperparams_id)
+    elif search_method == "beam":
+        hyperparams_id = "{} | sm-be-{}".format(hyperparams_id, beam_width)
 
     if use_recon:
         id = " | ".join([ model, corpus_id, encoder_id, decoder_id, reconstructor_id, embedding_id,
@@ -152,7 +162,7 @@ class EvalConfig:
 
     """ Model """
     model_dpath = "checkpoints"
-    model_id = "RecNet | MSVD tc-30 mc-5 sp-uniform_jitter | ENC InceptionV4 sm-28 | DEC lstm-1 at-128 dr-0.5-0.5 tf-1.0 lr-0.0001-wd-1e-05 op-amsgrad | EMB 468 dr-0.5 sc-1 | bs-100 | cp-50.0 | 181113-18:06:19"
+    model_id = "RecNet | MSVD tc-30 mc-5 sp-uniform | ENC InceptionV4 sm-28 | DEC gru-1 at-128 dr-0.5-0.5 tf-1.0 lr-0.0001-wd-1e-05 op-amsgrad | REC lr-1e-06-wd-1e-05 op-adam | EMB 468 dr-0.5 sc-1 | bs-100 | cp-50.0 | 181114-14:41:25"
     model_iteration = 100000
     model_fpath = "{}/{}/{}_checkpoint.tar".format(model_dpath, model_id, model_iteration)
 

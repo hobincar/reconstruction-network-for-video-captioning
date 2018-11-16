@@ -6,8 +6,6 @@ checkpoints/
 
 data/
 
-eval.py
-
 *logs/
 
 lib/
