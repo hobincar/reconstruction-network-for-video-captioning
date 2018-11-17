@@ -1,3 +1,5 @@
+from collections import defaultdict
+import itertools
 import time
 
 
@@ -79,7 +81,7 @@ class TrainConfig:
 
     """ Train """
     train_n_iteration = 100000
-    decoder_learning_rate = 1e-4
+    decoder_learning_rate = 1e-5
     reconstructor_learning_rate = 1e-6
     decoder_weight_decay = 1e-5
     reconstructor_weight_decay = 1e-5
@@ -89,9 +91,8 @@ class TrainConfig:
     clip = 50.0 # Gradient clipping
 
     """ Test """
-    search_method = "beam" # [ "greedy", "beam" ]
-    if search_method == "beam":
-        beam_width = 10
+    search_methods = [ "greedy", ("beam", 1), ("beam", 5), ("beam", 10), ("beam", 30) ]
+    scores = [ 'Bleu_1', 'Bleu_2', 'Bleu_3', 'Bleu_4', 'CIDEr', 'METEOR', 'ROUGE_L' ]
 
     """ Log """
     log_every = 500
@@ -117,10 +118,6 @@ class TrainConfig:
     hyperparams_id = "bs-{}".format(batch_size)
     if use_gradient_clip:
         hyperparams_id = "{} | cp-{}".format(hyperparams_id, clip)
-    if search_method == "greedy":
-        hyperparams_id = "{} | sm-gr".format(hyperparams_id)
-    elif search_method == "beam":
-        hyperparams_id = "{} | sm-be-{}".format(hyperparams_id, beam_width)
 
     if use_recon:
         id = " | ".join([ model, corpus_id, encoder_id, decoder_id, reconstructor_id, embedding_id,
@@ -142,13 +139,17 @@ class TrainConfig:
     tx_lambda_decoder = "lambda/decoder_regularizer"
     tx_lambda_reconstructor = "lambda/reconstructor_regularizer"
     tx_lambda = "lambda/reconstructor"
-    tx_score_Bleu1 = "score/Bleu-1"
-    tx_score_Bleu2 = "score/Bleu-2"
-    tx_score_Bleu3 = "score/Bleu-3"
-    tx_score_Bleu4 = "score/Bleu-4"
-    tx_score_CIDEr = "score/CIDEr"
-    tx_score_METEOR = "score/METEOR"
-    tx_score_ROUGE_L = "score/ROUGE_L"
+    tx_score = defaultdict(lambda: defaultdict(lambda: []))
+    for search_method, score in itertools.product(search_methods, scores):
+        if isinstance(search_method, str):
+            method = search_method
+            search_method_id = search_method
+        elif isinstance(search_method, tuple):
+            method = search_method[0]
+            search_method_id = "-".join((str(s) for s in search_method))
+        else:
+            raise NotImplementedError("Unknown search method: ", search_method)
+        tx_score[method][score] = "score ({})/{}".format(search_method_id, score)
 
 
 class EvalConfig:
@@ -162,7 +163,7 @@ class EvalConfig:
 
     """ Model """
     model_dpath = "checkpoints"
-    model_id = "RecNet | MSVD tc-30 mc-5 sp-uniform | ENC InceptionV4 sm-28 | DEC gru-1 at-128 dr-0.5-0.5 tf-1.0 lr-0.0001-wd-1e-05 op-amsgrad | REC lr-1e-06-wd-1e-05 op-adam | EMB 468 dr-0.5 sc-1 | bs-100 | cp-50.0 | 181114-14:41:25"
+    model_id = "RecNet | MSVD tc-30 mc-5 sp-uniform | ENC InceptionV4 sm-28 | DEC gru-1 at-128 dr-0.5-0.5 tf-1.0 lr-0.0001-wd-1e-05 op-amsgrad | REC GRU lr-1e-06-wd-1e-05 op-adam | EMB 468 dr-0.5 sc-1 | bs-100 | cp-50.0 | sm-be-10 | 181116-13:09:44"
     model_iteration = 100000
     model_fpath = "{}/{}/{}_checkpoint.tar".format(model_dpath, model_id, model_iteration)
 

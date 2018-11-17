@@ -365,20 +365,22 @@ def main():
         """ Log Test Progress """
         if args.debug or iteration % C.test_every == 0: # TODO: Replace nlgeval to coco-caption
             pd_vid_caption_pairs = []
-            score_data_loader = iter(MSVD.score_data_loader)
-            scores = evaluate(C, MSVD, score_data_loader, decoder)
-            print("[Test] Iter {} / {} ({:.1f}%): B1: {:.3f}, B2: {:.3f}, B3: {:.3f}, B4: {:.3f}, C: {:.3f}, M: {:.3f}, R: {:.3f}".format(
-                iteration, C.train_n_iteration, iteration / C.train_n_iteration * 100, scores['Bleu_1'],
-                scores['Bleu_2'], scores['Bleu_3'], scores['Bleu_4'], scores['CIDEr'], scores['METEOR'],
-                scores['ROUGE_L']))
-            if not args.debug:
-                summary_writer.add_scalar(C.tx_score_Bleu1, scores['Bleu_1'], iteration)
-                summary_writer.add_scalar(C.tx_score_Bleu2, scores['Bleu_2'], iteration)
-                summary_writer.add_scalar(C.tx_score_Bleu3, scores['Bleu_3'], iteration)
-                summary_writer.add_scalar(C.tx_score_Bleu4, scores['Bleu_4'], iteration)
-                summary_writer.add_scalar(C.tx_score_CIDEr, scores['CIDEr'], iteration)
-                summary_writer.add_scalar(C.tx_score_METEOR, scores['METEOR'], iteration)
-                summary_writer.add_scalar(C.tx_score_ROUGE_L, scores['ROUGE_L'], iteration)
+            score_data_loader = MSVD.score_data_loader
+            print("[Test] Iter {} / {} ({:.1f}%)".format(
+                iteration, C.train_n_iteration, iteration / C.train_n_iteration * 100))
+            for search_method in C.search_methods:
+                if isinstance(search_method, str):
+                    method = search_method
+                    search_method_id = search_method
+                if isinstance(search_method, tuple):
+                    method = search_method[0]
+                    search_method_id = "-".join(( str(s) for s in search_method ))
+                scores = evaluate(C, MSVD, score_data_loader, decoder, search_method)
+                score_summary = " ".join([ "{}: {:.3f}".format(score, scores[score]) for score in C.scores ])
+                print("\t{}: {}".format(search_method_id, score_summary))
+                if not args.debug:
+                    for score in C.scores:
+                        summary_writer.add_scalar(C.tx_score[search_method_id][score], scores[score], iteration)
 
 
         """ Save checkpoint """
