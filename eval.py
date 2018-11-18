@@ -33,10 +33,11 @@ def greedy_search(config, decoder, input, hidden, encoder_outputs):
     return output_indices
 
 
-def beam_search(config, beam_width, n_vocabs, decoder, input, hidden, encoder_outputs):
+def beam_search(config, beam_width, vocab, decoder, input, hidden, encoder_outputs):
     input_list = [ input ]
     hidden_list = [ hidden ]
     cum_prob_list = [ torch.cuda.FloatTensor([ 1. for _ in range(config.batch_size) ]) ]
+    cum_prob_list = [ torch.log(cum_prob) for cum_prob in cum_prob_list ]
 
     output_list = [ [[]] for _ in range(config.batch_size) ]
     for t in range(config.caption_max_len + 1):
@@ -47,31 +48,68 @@ def beam_search(config, beam_width, n_vocabs, decoder, input, hidden, encoder_ou
             output, next_hidden = decoder(input, hidden, encoder_outputs)
             tmp_next_hidden_list.append(next_hidden)
 
+            np_output_list = np.asarray(output_list)
+            EOS_row_idxs, EOS_col_idxs = np.where(np_output_list[:, i] == vocab.word2idx['<EOS>'])
+            sequence_length = np.empty(config.batch_size)
+            sequence_length.fill(t+1)
+            sequence_length[EOS_row_idxs] = EOS_col_idxs + 1
+            sequence_length = sequence_length ** 0.7
+            sequence_length = torch.cuda.FloatTensor(sequence_length)
+            
+            cum_prob = cum_prob / sequence_length
             cum_prob = cum_prob.unsqueeze(1).expand_as(output)
-            output *= cum_prob
+            output = torch.log(torch.sigmoid(output))
+            output += cum_prob
             outputs = output if outputs is None else torch.cat(( outputs, output ), dim=1)
         topk_probs, topk_flat_idxs = outputs.topk(beam_width)
 
         topk_probs = topk_probs.transpose(0, 1) # (beam_width, batch_size)
         topk_flat_idxs = topk_flat_idxs.transpose(0, 1) # (beam_width, batch_size)
-        topk_idxs = topk_flat_idxs % n_vocabs
-        topk_is = topk_flat_idxs // n_vocabs
+        topk_idxs = topk_flat_idxs % vocab.n_vocabs
+        topk_is = topk_flat_idxs // vocab.n_vocabs
 
+        """ input list """
         next_input_list = topk_idxs.clone()
+
+        """ cum prob list """
         next_cum_prob_list = topk_probs.clone()
-        next_hidden_list = []
+
+        """ hidden list """
+        if config.decoder_model == "LSTM":
+            next_hidden_list = []
+            next_context_list = []
+            for topk_idx, topk_i in zip(topk_idxs, topk_is): # Iterate <beam_width> times
+                next_hidden = []
+                next_context = []
+                for b, (i, k) in enumerate(zip(topk_idx, topk_i)): # Iterate <batch_size> times
+                    next_hidden.append(tmp_next_hidden_list[k][0][:, b])
+                    next_context.append(tmp_next_hidden_list[k][1][:, b])
+                next_hidden = torch.cat(next_hidden)
+                next_context = torch.cat(next_context)
+                next_hidden = next_hidden.unsqueeze(0)
+                next_context = next_context.unsqueeze(0)
+                next_hidden_list.append(next_hidden)
+                next_context_list.append(next_context)
+            next_hidden_list = [ (h, c) for h, c in zip(next_hidden_list, next_context_list) ]
+        else:
+            next_hidden_list = []
+            for topk_idx, topk_i in zip(topk_idxs, topk_is): # Iterate <beam_width> times
+                next_hidden = []
+                for b, (i, k) in enumerate(zip(topk_idx, topk_i)): # Iterate <batch_size> times
+                    next_hidden.append(tmp_next_hidden_list[k][:, b])
+                next_hidden = torch.cat(next_hidden)
+                next_hidden = next_hidden.unsqueeze(0)
+                next_hidden_list.append(next_hidden)
+
+        """ output list """
         next_output_list = [ [] for _ in range(config.batch_size) ]
         for topk_idx, topk_i in zip(topk_idxs, topk_is): # Iterate <beam_width> times
-            next_hidden = []
             for b, (i, k) in enumerate(zip(topk_idx, topk_i)): # Iterate <batch_size> times
-                next_hidden.append(tmp_next_hidden_list[k][:, b])
                 next_output_list[b].append(output_list[b][k] + [ i.item() ])
-            next_hidden = torch.cat(next_hidden)
-            next_hidden.unsqueeze(0)
-            next_hidden_list.append(next_hidden)
+
 
         input_list = [ input.unsqueeze(0) for input in next_input_list ]
-        hidden_list = [ hidden.unsqueeze(0) for hidden in next_hidden_list ]
+        hidden_list = next_hidden_list
         cum_prob_list = next_cum_prob_list
         output_list = next_output_list
 
@@ -106,7 +144,7 @@ def evaluate(config, corpus, data_loader, decoder, search_method):
             output_indices = greedy_search(config, decoder, input, hidden, encoder_outputs)
         elif isinstance(search_method, tuple) and search_method[0] == "beam":
             beam_width = search_method[1]
-            output_indices = beam_search(config, beam_width, corpus.vocab.n_vocabs, decoder, input, hidden, encoder_outputs)
+            output_indices = beam_search(config, beam_width, corpus.vocab, decoder, input, hidden, encoder_outputs)
             output_indices = np.asarray(output_indices)
             output_indices = output_indices.T
         else:

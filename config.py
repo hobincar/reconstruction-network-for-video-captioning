@@ -29,7 +29,7 @@ class TrainConfig:
     corpus = "MSVD" # [ "MSVD" ]
     encoder_model = "InceptionV4" # [ "InceptionV4" ]
     decoder_model = "GRU" # [ "LSTM", "GRU" ]
-    reconstructor_model = "GRU" # [ "LSTM", "GRU" ]
+    reconstructor_model = "LSTM" # [ "LSTM", "GRU" ]
     device = "cuda"
 
     """ Data Loader """
@@ -81,8 +81,8 @@ class TrainConfig:
 
     """ Train """
     train_n_iteration = 100000
-    decoder_learning_rate = 1e-5
-    reconstructor_learning_rate = 1e-6
+    decoder_learning_rate = 3e-5
+    reconstructor_learning_rate = 1e-7
     decoder_weight_decay = 1e-5
     reconstructor_weight_decay = 1e-5
     decoder_use_amsgrad = True
@@ -91,7 +91,7 @@ class TrainConfig:
     clip = 50.0 # Gradient clipping
 
     """ Test """
-    search_methods = [ "greedy", ("beam", 1), ("beam", 5), ("beam", 10), ("beam", 30) ]
+    search_methods = [ "greedy", ("beam", 1), ("beam", 5), ("beam", 10) ]
     scores = [ 'Bleu_1', 'Bleu_2', 'Bleu_3', 'Bleu_4', 'CIDEr', 'METEOR', 'ROUGE_L' ]
 
     """ Log """
@@ -149,7 +149,7 @@ class TrainConfig:
             search_method_id = "-".join((str(s) for s in search_method))
         else:
             raise NotImplementedError("Unknown search method: ", search_method)
-        tx_score[method][score] = "score ({})/{}".format(search_method_id, score)
+        tx_score[search_method_id][score] = "score with {} search/{}".format(search_method_id, score)
 
 
 class EvalConfig:
