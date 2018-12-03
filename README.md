@@ -18,7 +18,8 @@ This project tries to implement *RecNet* proposed on **[Reconstruction Network f
 ### Setup environment
 
 1. Install Java 8.
-2. Setup python virtual environment.
+2. Install Python 2.7
+3. Setup python virtual environment.
    ```
    $ virtualenv .env
    $ source .env/bin/activate
