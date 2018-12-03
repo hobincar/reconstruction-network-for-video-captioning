@@ -18,7 +18,7 @@ This project tries to implement *RecNet* proposed on **[Reconstruction Network f
 
 ## How to use
 
-### Setup python virtual environment
+### Step 1. Setup python virtual environment
 
 ```
 $ pip install virtualenv
@@ -29,7 +29,7 @@ $ source .env/bin/activate
 ```
 
 
-### Prepare Data
+### Step 2. Prepare Data
 
 1. Extract feature vectors of datasets by following instructions in [here](https://github.com/hobincar/awesome-video-dataset), and locate them at `~/<dataset>/features/<network>.hdf5`
    
@@ -42,7 +42,7 @@ $ source .env/bin/activate
    ```
    
 
-### Train
+### Step 3. Train
 
 1. Set hyperparameters in `config.py`.
 2. Run
@@ -51,7 +51,7 @@ $ source .env/bin/activate
    ```
 
 
-### Inference
+### Step 4. Inference
 
 1. Set hyperparameters in `config.py`.
 2. Run
