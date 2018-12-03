@@ -38,7 +38,7 @@ $ source .env/bin/activate
 2. Set hyperparameters in `config.py` and split the dataset into train / val / test dataset by running following command.
    
    ```
-   $ python -m scripts.split
+   (.env) $ python -m scripts.split
    ```
    
 
@@ -47,7 +47,7 @@ $ source .env/bin/activate
 1. Set hyperparameters in `config.py`.
 2. Run
    ```
-   $ python train.py
+   (.env) $ python train.py
    ```
 
 
@@ -56,7 +56,7 @@ $ source .env/bin/activate
 1. Set hyperparameters in `config.py`.
 2. Run
    ```
-   $ python run.py
+   (.env) $ python run.py
    ```
 
 
@@ -66,7 +66,7 @@ $ source .env/bin/activate
 
 * MSVD
 
-  |      | BLEU4 | METEOR | CIDEr | ROUGE_L |
+  |   | BLEU4 | METEOR | CIDEr | ROUGE_L |
   | :---: | :---: | :---: | :---: | :---: |
   | Ours (global) | 40.7 | 27.3 | 34.4 | 61.9 |
   
@@ -74,7 +74,7 @@ $ source .env/bin/activate
 
 * MSR-VTT
 
-  |      | BLEU4 | METEOR | CIDEr | ROUGE_L |
+  |   | BLEU4 | METEOR | CIDEr | ROUGE_L |
   | :---: | :---: | :---: | :---: | :---: |
   | Ours | - | - | - | - |
   | Paper (local) | 39.1 | 26.6 | 59.3 | 42.7 |
