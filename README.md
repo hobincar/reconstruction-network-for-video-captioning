@@ -6,6 +6,9 @@ This project tries to implement *RecNet* proposed on **[Reconstruction Network f
 
 ## Requirements
 
+* Ubuntu 16.04
+* CUDA 9.0
+* cuDNN 7.3.1
 * Java 1.8
 * Python 2.7.12
   * PyTorch 1.0
@@ -15,21 +18,20 @@ This project tries to implement *RecNet* proposed on **[Reconstruction Network f
 
 ## How to use
 
-### Setup environment
+### Setup python virtual environment
 
-1. Install Java 8.
-2. Install Python 2.7
-3. Setup python virtual environment.
-   ```
-   $ virtualenv .env
-   $ source .env/bin/activate
-   $ pip install --upgrade pip
-   $ pip install -r requirements.txt
-   ```
+```
+$ pip install virtualenv
+$ virtualenv .env
+$ source .env/bin/activate
+(.env) $ pip install --upgrade pip
+(.env) $ pip install -r requirements.txt
+```
+
 
 ### Prepare Data
 
-1. Extract feature vectors of datasets by following instructions in *TBD*, and locate them at `~/<dataset>/features/<network>.hdf5`
+1. Extract feature vectors of datasets by following instructions in [here](https://github.com/hobincar/awesome-video-dataset), and locate them at `~/<dataset>/features/<network>.hdf5`
    
    > e.g. InceptionV4 feature vectors of MSVD dataset will be located at `~/data/MSVD/features/InceptionV4.hdf5`.
 
