@@ -69,8 +69,10 @@ $ source .env/bin/activate
   |   | BLEU4 | METEOR | CIDEr | ROUGE_L |
   | :---: | :---: | :---: | :---: | :---: |
   | Ours (global) | 40.7 | 27.3 | 34.4 | 61.9 |
-  
   | Paper (local) | 52.3 | 34.1 | 69.8 | 80.7 |
+<!--
+[Ours (global)]: RecNet | MSVD tc-30 mc-5 sp-uniform | ENC InceptionV4 sm-28 | DEC lstm-1 at-128 dr-0.5-0.5 tf-1.0 lr-1e-05-wd-1e-05 op-amsgrad | REC LSTM lr-1e-06-wd-1e-05 op-adam | EMB 468 dr-0.5 sc-1 | bs-100 | cp-50.0 | 181117-18:32:22
+-->
 
 * MSR-VTT
 
