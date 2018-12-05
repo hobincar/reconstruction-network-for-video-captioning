@@ -101,14 +101,39 @@ def forward_global_reconstructor(decoder_hiddens, targets, reconstructor, loss_f
         output, hidden = reconstructor(decoder_hiddens[t], hidden, decoder_hiddens)
         outputs.append(output)
     outputs = torch.stack(outputs)
-    outputs = outputs.mean(0)
 
+    outputs = outputs.mean(0)
     targets = targets.mean(1)
+
+    loss = loss_func(outputs, targets)
+    loss /= decoder_max_n_words
+    return loss
+
+
+def forward_local_reconstructor(decoder_hiddens, targets, reconstructor, loss_func):
+    decoder_hiddens = decoder_hiddens.to(C.device)
+    targets = targets.to(C.device)
+
+    if C.reconstructor_model == "LSTM":
+        hidden = (
+            torch.zeros(C.reconstructor_n_layers, C.batch_size, C.reconstructor_hidden_size).to(C.device),
+            torch.zeros(C.reconstructor_n_layers, C.batch_size, C.reconstructor_hidden_size).to(C.device),
+        )
+    else:
+        hidden = torch.zeros(C.reconstructor_n_layers, C.batch_size, C.reconstructor_hidden_size)
+        hidden = hidden.to(C.device)
+
+    outputs = []
+    for t in range(C.encoder_output_len):
+        output, hidden = reconstructor(hidden, decoder_hiddens)
+        outputs.append(output)
+    outputs = torch.stack(outputs)
+
+    outputs = outputs.transpose(0, 1)
     loss = loss_func(outputs, targets)
 
-    loss /= decoder_max_n_words
-
     return loss
+
 
 
 def dec_rec_step(batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimizer, reconstructor,
@@ -136,6 +161,9 @@ def dec_rec_step(batch, decoder, decoder_loss_func, decoder_lambda, decoder_opti
         reconstructor.eval()
     if C.reconstructor_type == "global":
         recon_loss = forward_global_reconstructor(
+            decoder_hiddens, encoder_outputs, reconstructor, reconstructor_loss_func)
+    elif C.reconstructor_type == "local":
+        recon_loss = forward_local_reconstructor(
             decoder_hiddens, encoder_outputs, reconstructor, reconstructor_loss_func)
     else:
         raise NotImplementedError("Unknown reconstructor type '{}'".format(C.reconstructor_type))
@@ -193,6 +221,7 @@ def dec_step(batch, decoder, decoder_loss_func, decoder_lambda, decoder_optimize
 def main():
     a = argparse.ArgumentParser()
     a.add_argument("--debug", "-D", action="store_true")
+    a.add_argument("--loss_only", "-L", action="store_true")
     args = a.parse_args()
 
     print("MODEL ID: {}".format(C.id))
@@ -237,9 +266,13 @@ def main():
     if C.use_recon:
         if C.reconstructor_type == "local":
             reconstructor = LocalReconstructor(
+                model_name=C.reconstructor_model,
                 n_layers=C.reconstructor_n_layers,
+                decoder_hidden_size=C.decoder_hidden_size,
                 hidden_size=C.reconstructor_hidden_size,
-                dropout=C.reconstructor_dropout)
+                dropout=C.reconstructor_dropout,
+                decoder_dropout=C.reconstructor_decoder_dropout,
+                attn_size=C.reconstructor_attn_size)
         elif C.reconstructor_type == "global":
             reconstructor = GlobalReconstructor(
                 model_name=C.reconstructor_model,
@@ -249,6 +282,8 @@ def main():
                 dropout=C.reconstructor_dropout,
                 decoder_dropout=C.reconstructor_decoder_dropout,
                 caption_max_len=C.caption_max_len)
+        else:
+            raise NotImplementedError("Unknown reconstructor: {}".format(C.reconstructor_type))
         reconstructor = reconstructor.to(C.device)
         reconstructor_loss_func = nn.MSELoss()
         reconstructor_optimizer = optim.Adam(reconstructor.parameters(), lr=C.reconstructor_learning_rate,
@@ -363,7 +398,7 @@ def main():
 
 
         """ Log Test Progress """
-        if args.debug or iteration % C.test_every == 0: # TODO: Replace nlgeval to coco-caption
+        if not args.loss_only and (args.debug or iteration % C.test_every == 0):
             pd_vid_caption_pairs = []
             score_data_loader = MSVD.score_data_loader
             print("[Test] Iter {} / {} ({:.1f}%)".format(

@@ -4,8 +4,7 @@ import torch.nn.functional as F
 
 
 class GlobalReconstructor(nn.Module):
-    def __init__(self, model_name, n_layers, decoder_hidden_size, hidden_size, dropout, decoder_dropout,
-                 caption_max_len):
+    def __init__(self, model_name, n_layers, decoder_hidden_size, hidden_size, dropout, decoder_dropout, caption_max_len):
         super(GlobalReconstructor, self).__init__()
         self.model_name = model_name
         self.n_layers = n_layers

@@ -34,9 +34,6 @@ def save_metadata(fpath, vids, metadata_df):
     print("Saved {}".format(fpath))
 
 def split():
-    video_dpath = os.path.dirname(C.video_fpath)
-    caption_dpath = os.path.dirname(C.caption_fpath)
-
     videos = load_videos()
     metadata = load_metadata()
 

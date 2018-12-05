@@ -28,7 +28,7 @@ class TrainConfig:
     model = "RecNet"
     corpus = "MSVD" # [ "MSVD" ]
     encoder_model = "InceptionV4" # [ "InceptionV4" ]
-    decoder_model = "GRU" # [ "LSTM", "GRU" ]
+    decoder_model = "LSTM" # [ "LSTM", "GRU" ]
     reconstructor_model = "LSTM" # [ "LSTM", "GRU" ]
     device = "cuda"
 
@@ -73,16 +73,18 @@ class TrainConfig:
     """ Reconstructor """
     use_recon = True
     if use_recon:
-        reconstructor_type = "global" # [ "global", "local" ]
+        reconstructor_type = "local" # [ "global", "local" ]
         reconstructor_n_layers = 1
         reconstructor_hidden_size = 1536
         reconstructor_decoder_dropout = 0.5
         reconstructor_dropout = 0.5
+        if reconstructor_type == "local":
+            reconstructor_attn_size = 128
 
     """ Train """
     train_n_iteration = 100000
-    decoder_learning_rate = 3e-5
-    reconstructor_learning_rate = 1e-7
+    decoder_learning_rate = 1e-5
+    reconstructor_learning_rate = 1e-6
     decoder_weight_decay = 1e-5
     reconstructor_weight_decay = 1e-5
     decoder_use_amsgrad = True
@@ -91,12 +93,12 @@ class TrainConfig:
     clip = 50.0 # Gradient clipping
 
     """ Test """
-    search_methods = [ "greedy", ("beam", 1), ("beam", 5), ("beam", 10) ]
+    search_methods = [ "greedy", ("beam", 5) ]
     scores = [ 'Bleu_1', 'Bleu_2', 'Bleu_3', 'Bleu_4', 'CIDEr', 'METEOR', 'ROUGE_L' ]
 
     """ Log """
     log_every = 500
-    validate_every = 2000
+    validate_every = 5000
     test_every = 10000
     save_every = 100000
     n_val_logs = 10
@@ -109,11 +111,15 @@ class TrainConfig:
     corpus_id = "{} tc-{} mc-{} sp-{}".format(corpus, caption_max_len, min_count, frame_sampling_method)
     encoder_id = "ENC {} sm-{}".format(encoder_model, encoder_output_len)
     decoder_id = "DEC {}-{} at-{} dr-{}-{} tf-{} lr-{}-wd-{} op-{}".format(
-        decoder_model.lower(), decoder_n_layers, decoder_attn_size, decoder_dropout, decoder_out_dropout,
+        decoder_model, decoder_n_layers, decoder_attn_size, decoder_dropout, decoder_out_dropout,
         decoder_teacher_forcing_ratio, decoder_learning_rate, decoder_weight_decay,
         ["adam", "amsgrad"][decoder_use_amsgrad])
-    reconstructor_id = "REC {} lr-{}-wd-{} op-{}".format(
-        reconstructor_model, reconstructor_learning_rate, reconstructor_weight_decay, ["adam", "amsgrad"][reconstructor_use_amsgrad])
+    if use_recon:
+        reconstructor_id = "REC-{} {} lr-{}-wd-{} op-{}".format(
+            reconstructor_type, reconstructor_model, reconstructor_learning_rate, reconstructor_weight_decay,
+            ["adam", "amsgrad"][reconstructor_use_amsgrad])
+        if reconstructor_type == "local":
+            reconstructor_id = "{} at-{}".format(reconstructor_id, reconstructor_attn_size)
     embedding_id = "EMB {} dr-{} sc-{}".format(embedding_size, embedding_dropout, embedding_scale)
     hyperparams_id = "bs-{}".format(batch_size)
     if use_gradient_clip:
