@@ -68,10 +68,18 @@ $ source .env/bin/activate
 
   |   | BLEU4 | METEOR | CIDEr | ROUGE_L |
   | :---: | :---: | :---: | :---: | :---: |
+  | Ours (wo. reconstructor) | 39.4 | 27.2 | 37.8 | 61.8 |
   | Ours (global) | 40.7 | 27.3 | 34.4 | 61.9 |
-  | Paper (local) | 52.3 | 34.1 | 69.8 | 80.7 |
+  | Ours (local) | 35.3 | 27.3 | 35.2 | 61.9 |
+  | Paper (global) | 51.1 | 34.0 | 69.4 | 79.7 |
+  | **Paper (local)** | **52.3** | **34.1** | **69.8** | **80.7** |
+
 <!--
-[Ours (global)]: RecNet | MSVD tc-30 mc-5 sp-uniform | ENC InceptionV4 sm-28 | DEC lstm-1 at-128 dr-0.5-0.5 tf-1.0 lr-1e-05-wd-1e-05 op-amsgrad | REC LSTM lr-1e-06-wd-1e-05 op-adam | EMB 468 dr-0.5 sc-1 | bs-100 | cp-50.0 | 181117-18:32:22
+[Ours (wo. reconstructor)] (100k) RecNet | MSVD tc-30 mc-5 sp-uniform | ENC InceptionV4 sm-28 | DEC LSTM-1 at-128 dr-0.5-0.5 tf-1.0 lr-1e-05-wd-1e-05 op-amsgrad | EMB 468 dr-0.5 sc-1 | bs-100 | cp-50.0 | 181204-15:25:22
+
+[Ours (global)]: (100k) RecNet | MSVD tc-30 mc-5 sp-uniform | ENC InceptionV4 sm-28 | DEC lstm-1 at-128 dr-0.5-0.5 tf-1.0 lr-1e-05-wd-1e-05 op-amsgrad | REC LSTM lr-1e-06-wd-1e-05 op-adam | EMB 468 dr-0.5 sc-1 | bs-100 | cp-50.0 | 181117-18:32:22
+
+[Ours (local)] (100k) RecNet | MSVD tc-30 mc-5 sp-uniform | ENC InceptionV4 sm-28 | DEC LSTM-1 at-128 dr-0.5-0.5 tf-1.0 lr-1e-05-wd-1e-05 op-amsgrad | REC-local LSTM lr-1e-06-wd-1e-05 op-adam at-128 | EMB 468 dr-0.5 sc-1 | bs-100 | cp-50.0 | 181204-15:26:31
 -->
 
 * MSR-VTT
@@ -79,21 +87,11 @@ $ source .env/bin/activate
   |   | BLEU4 | METEOR | CIDEr | ROUGE_L |
   | :---: | :---: | :---: | :---: | :---: |
   | Ours | - | - | - | - |
-  | Paper (local) | 39.1 | 26.6 | 59.3 | 42.7 |
-
-
-### loss
-
-![image](https://user-images.githubusercontent.com/17702664/49371473-e364d480-f73a-11e8-809b-107ed321e841.png)
-
-
-### evaluation metrics (BLEU, METEOR, CIDEr, and ROUGE_L)
-
-![image](https://user-images.githubusercontent.com/17702664/49371614-6b4ade80-f73b-11e8-8cec-e0e4dc6b8fb8.png)
+  | Paper (global) | 38.3 | 26.2 | 59.1 | 41.7 |
+  | **Paper (local)** | **39.1** | **26.6** | **59.3** | **42.7** |
 
 
 ## TODO
 
 * Add C3D feature vectors.
-* Implement a local reconstructor network.
 * Add MSR-VTT dataset.
