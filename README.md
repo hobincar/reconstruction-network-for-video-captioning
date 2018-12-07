@@ -64,6 +64,8 @@ $ source .env/bin/activate
 
 ### Comparison with original paper
 
+**NOTE**: *For now, only 2D features are used for evaluating our model (3D features are missing).*
+
 * MSVD
 
   |   | BLEU4 | METEOR | CIDEr | ROUGE_L |
