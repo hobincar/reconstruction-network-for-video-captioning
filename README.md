@@ -95,6 +95,6 @@ $ source .env/bin/activate
 
 ## TODO
 
-* Add qualitative results
+* Add qualitative results.
 * Add C3D feature vectors.
 * Add MSR-VTT dataset.
