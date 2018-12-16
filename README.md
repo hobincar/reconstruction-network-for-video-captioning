@@ -31,7 +31,7 @@ $ source .env/bin/activate
 
 ### Step 2. Prepare Data
 
-1. Extract feature vectors of datasets by following instructions in [here](https://github.com/hobincar/awesome-video-dataset), and locate them at `~/<dataset>/features/<network>.hdf5`
+1. Extract feature vectors of datasets (e.g. [MSVD](https://github.com/hobincar/MSVD)), and locate them at `~/<dataset>/features/<network>.hdf5`
    
    > e.g. InceptionV4 feature vectors of MSVD dataset will be located at `~/data/MSVD/features/InceptionV4.hdf5`.
 
