@@ -28,7 +28,7 @@ class TrainConfig:
     model = "RecNet"
     corpus = "MSVD" # [ "MSVD" ]
     encoder_model = "InceptionV4" # [ "InceptionV4" ]
-    decoder_model = "LSTM" # [ "LSTM", "GRU" ]
+    decoder_model = "GRU" # [ "LSTM", "GRU" ]
     reconstructor_model = "LSTM" # [ "LSTM", "GRU" ]
     device = "cuda"
 
@@ -82,7 +82,7 @@ class TrainConfig:
             reconstructor_attn_size = 128
 
     """ Train """
-    train_n_iteration = 100000
+    n_iterations = 100000
     decoder_learning_rate = 1e-5
     reconstructor_learning_rate = 1e-6
     decoder_weight_decay = 1e-5
@@ -90,7 +90,7 @@ class TrainConfig:
     decoder_use_amsgrad = True
     reconstructor_use_amsgrad = False
     use_gradient_clip = True
-    clip = 50.0 # Gradient clipping
+    gradient_clip = 50.0
 
     """ Test """
     search_methods = [ "greedy", ("beam", 5) ]
@@ -101,7 +101,6 @@ class TrainConfig:
     validate_every = 5000
     test_every = 10000
     save_every = 100000
-    n_val_logs = 10
     timestamp = time.strftime("%y%m%d-%H:%M:%S", time.gmtime())
     if corpus == "MSVD":
         n_val = 100
@@ -123,7 +122,7 @@ class TrainConfig:
     embedding_id = "EMB {} dr-{} sc-{}".format(embedding_size, embedding_dropout, embedding_scale)
     hyperparams_id = "bs-{}".format(batch_size)
     if use_gradient_clip:
-        hyperparams_id = "{} | cp-{}".format(hyperparams_id, clip)
+        hyperparams_id = "{} | cp-{}".format(hyperparams_id, gradient_clip)
 
     if use_recon:
         id = " | ".join([ model, corpus_id, encoder_id, decoder_id, reconstructor_id, embedding_id,

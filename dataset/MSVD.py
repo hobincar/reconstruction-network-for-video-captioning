@@ -263,6 +263,7 @@ class MSVDDataset(Dataset):
                 self.video_caption_pairs.append(( vid, video, caption ))
         return self.video_caption_pairs
 
+
 class MSVDScoreDataset(Dataset):
     """ MSVD Dataset for Evaluation """
 
