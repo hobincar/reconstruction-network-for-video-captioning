@@ -263,7 +263,8 @@ def main():
 
         # Backprop
         decoder['optimizer'].zero_grad()
-        reconstructor['optimizer'].zero_grad()
+        if C.use_recon:
+            reconstructor['optimizer'].zero_grad()
         loss.backward()
         if C.use_gradient_clip:
             torch.nn.utils.clip_grad_norm_(decoder['model'].parameters(), C.gradient_clip)
@@ -278,10 +279,11 @@ def main():
 
         """ Log Train Progress """
         if args.debug or iteration % C.log_every == 0:
-            train_loss /= C.log_every
+            n_trains = C.log_every * C.batch_size
+            train_loss /= n_trains
             if C.use_recon:
-                train_dec_loss /= C.log_every
-                train_rec_loss /= C.log_every
+                train_dec_loss /= n_trains
+                train_rec_loss /= n_trains
 
             if not args.debug:
                 summary_writer.add_scalar(C.tx_train_loss, train_loss, iteration)
@@ -348,7 +350,7 @@ def main():
                 gt_captions += convert_idxs_to_sentences(gt_idxs, vocab.idx2word, vocab.word2idx['<EOS>'])
                 pd_captions += convert_idxs_to_sentences(pd_idxs, vocab.idx2word, vocab.word2idx['<EOS>'])
 
-            n_vals = len(val_data_loader)
+            n_vals = len(val_data_loader) * C.batch_size
             val_loss /= n_vals
             if C.use_recon:
                 val_dec_loss /= n_vals
