@@ -1,3 +1,7 @@
+***NOTE: the new repository is opened ([link](https://github.com/hobincar/RecNet))***
+
+***
+
 # reconstruction-network-for-video-captioning
 
 This project tries to implement *RecNet* proposed on **[Reconstruction Network for Video Captioning](http://openaccess.thecvf.com/content_cvpr_2018/papers/Wang_Reconstruction_Network_for_CVPR_2018_paper.pdf)** in **CVPR 2018**.
